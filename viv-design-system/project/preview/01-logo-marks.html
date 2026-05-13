@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>
+body{margin:0;padding:22px 24px;background:#fff;}
+.label{font-family:var(--font-sans);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:var(--fg-3);margin-bottom:10px;}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:0;border-radius:18px;overflow:hidden;}
+.cell{
+  aspect-ratio: 2 / 1;
+  display:flex;align-items:center;justify-content:center;
+  padding:36px;
+  position:relative;
+}
+.cell img{max-height:72%;max-width:72%;object-fit:contain;display:block;}
+.cell--grey{background:#B6B6B6;}
+.cell--offwhite{background:#F9F9F9;}
+.cell--black{background:#000000;}
+.cell--lime{background:linear-gradient(90deg,#63A700 0%,#C1F903 100%);}
+.tag{
+  position:absolute; bottom:10px; left:12px;
+  font-family:var(--font-sans); font-size:10px; font-weight:600;
+  letter-spacing:.08em; text-transform:uppercase;
+  padding:3px 8px; border-radius:999px;
+  background:rgba(255,255,255,0.82); color:#000;
+}
+.cell--offwhite .tag{background:rgba(0,0,0,0.06);}
+.source{font-family:var(--font-sans);font-size:11px;color:var(--fg-3);margin-top:12px;}
+</style></head><body>
+<div class="label">Déclinaisons logo — combinaisons validées</div>
+<div class="grid">
+  <div class="cell cell--grey">
+    <img src="../assets/logos/viv-mark-white.png" alt="VIV logo blanc sur gris">
+    <div class="tag">Gris · Blanc</div>
+  </div>
+  <div class="cell cell--offwhite">
+    <img src="../assets/logos/viv-mark-black.png" alt="VIV logo noir sur off-white">
+    <div class="tag">Off-white · Noir</div>
+  </div>
+  <div class="cell cell--black">
+    <img src="../assets/logos/viv-mark-white.png" alt="VIV logo blanc sur noir">
+    <div class="tag" style="background:rgba(255,255,255,0.9)">Noir · Blanc</div>
+  </div>
+  <div class="cell cell--lime">
+    <img src="../assets/logos/viv-mark-black.png" alt="VIV logo noir sur dégradé lime">
+    <div class="tag">Lime gradient · Noir</div>
+  </div>
+</div>
+<div class="source">Source : Charte graphique VIV 2025 — Déclinaisons couleurs du logo</div>
+</body></html>

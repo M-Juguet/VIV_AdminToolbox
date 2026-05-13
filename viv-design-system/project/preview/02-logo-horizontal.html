@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>
+body{margin:0;padding:24px 26px;background:#fff;}
+.label{font-family:var(--font-sans);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:var(--fg-3);margin-bottom:10px;}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+.cell{
+  border-radius:18px;
+  height:170px;
+  display:flex; align-items:center; justify-content:center;
+  padding:26px 36px;
+  position:relative;
+  overflow:hidden;
+}
+.cell--lime{background:linear-gradient(90deg,#63A700 0%,#C1F903 100%);}
+.cell--grey{background:#B6B6B6;}
+.cell--black{background:#000000;}
+.cell--offwhite{background:#F9F9F9; border:1px solid rgba(0,0,0,0.08);}
+
+.lockup{
+  display:flex; align-items:center; gap:18px;
+}
+.lockup img{
+  height:72px; width:auto; display:block;
+}
+.lockup .bar{
+  width:1px; align-self:stretch;
+}
+.lockup .baseline{
+  font-family:var(--font-sans);
+  font-weight:400;
+  font-size:18px;
+  letter-spacing:-0.005em;
+  white-space:nowrap;
+  line-height:1;
+}
+
+/* Ink (black) logo + black baseline on off-white & lime */
+.lockup--ink .bar{background:#000000;}
+.lockup--ink .baseline{color:#000000;}
+
+/* White logo + white baseline on black & grey */
+.lockup--white .bar{background:#ffffff;}
+.lockup--white .baseline{color:#ffffff;}
+
+.tag{
+  position:absolute; bottom:10px; left:14px;
+  font-family:var(--font-sans); font-size:10px; font-weight:600;
+  letter-spacing:.08em; text-transform:uppercase;
+  padding:3px 8px; border-radius:999px;
+  background:rgba(255,255,255,0.82); color:#000;
+}
+.cell--offwhite .tag{background:rgba(0,0,0,0.06);}
+.cell--black .tag{background:rgba(255,255,255,0.9);}
+
+.source{font-family:var(--font-sans);font-size:11px;color:var(--fg-3);margin-top:14px;}
+</style></head><body>
+<div class="label">Logo horizontal avec baseline — combinaisons validées</div>
+<div class="grid">
+  <div class="cell cell--lime">
+    <div class="lockup lockup--ink">
+      <img src="../assets/logos/viv-mark-black.png" alt="">
+      <div class="bar"></div>
+      <div class="baseline">vos projets, nos talents.</div>
+    </div>
+    <div class="tag">Lime gradient · Noir</div>
+  </div>
+  <div class="cell cell--grey">
+    <div class="lockup lockup--white">
+      <img src="../assets/logos/viv-mark-white.png" alt="">
+      <div class="bar"></div>
+      <div class="baseline">vos projets, nos talents.</div>
+    </div>
+    <div class="tag">Gris · Blanc</div>
+  </div>
+  <div class="cell cell--black">
+    <div class="lockup lockup--white">
+      <img src="../assets/logos/viv-mark-white.png" alt="">
+      <div class="bar"></div>
+      <div class="baseline">vos projets, nos talents.</div>
+    </div>
+    <div class="tag">Noir · Blanc</div>
+  </div>
+  <div class="cell cell--offwhite">
+    <div class="lockup lockup--ink">
+      <img src="../assets/logos/viv-mark-black.png" alt="">
+      <div class="bar"></div>
+      <div class="baseline">vos projets, nos talents.</div>
+    </div>
+    <div class="tag">Off-white · Noir</div>
+  </div>
+</div>
+<div class="source">Source : Charte graphique VIV 2025 — Logo horizontal + baseline « vos projets, nos talents. »</div>
+</body></html>

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>
+body{margin:0;padding:36px 44px;background:#000000;color:#fff;}
+.wrap{max-width:860px;}
+.headline{
+  font-family:var(--font-display); font-weight:700; font-style:italic;
+  font-size:52px; line-height:1.05; letter-spacing:-0.02em;
+  color:#ffffff; margin:0 0 22px;
+  text-wrap:balance;
+}
+.lede{
+  margin:0 0 32px; font-family:var(--font-sans); font-weight:400;
+  font-size:17px; line-height:1.55;
+  color:rgba(255,255,255,0.82);
+  max-width:620px;
+}
+.ctas{display:flex; gap:14px; flex-wrap:wrap;}
+.btn{
+  display:inline-flex; align-items:center; justify-content:center;
+  padding:13px 28px; border-radius:999px;
+  font-family:var(--font-sans); font-style:italic; font-weight:500; font-size:15px;
+  text-decoration:none;
+  transition:all .2s ease;
+}
+.btn--outline{
+  background:transparent; color:#ffffff;
+  border:1px solid rgba(255,255,255,0.5);
+}
+.btn--outline:hover{background:#ffffff; color:#000000; border-color:#ffffff;}
+.btn--lime{
+  background:#C1F903; color:#000000;
+  border:1px solid #C1F903;
+  text-decoration:underline; text-underline-offset:3px; text-decoration-thickness:1px;
+}
+.btn--lime:hover{background:#63A700; border-color:#63A700; color:#000;}
+
+.rule{
+  font-family:var(--font-sans); font-size:11px;
+  color:rgba(255,255,255,0.45); margin-top:40px; line-height:1.55;
+  max-width:620px;
+}
+.rule strong{color:#ffffff; font-weight:600;}
+</style></head><body>
+<div class="wrap">
+  <h1 class="headline">Sourcing et placement des meilleurs talents pour accélérer la performance de vos projets.</h1>
+  <p class="lede">Spécialiste de la mise à disposition de talents, VIV accompagne les entreprises dans l'intégration rapide de profils experts au sein de leurs équipes. Un modèle agile, conforme et durable, pour des collaborations efficaces dès le premier jour.</p>
+  <div class="ctas">
+    <a class="btn btn--outline" href="#">Découvrez nos talents</a>
+    <a class="btn btn--lime" href="#">Nos engagements</a>
+  </div>
+  <div class="rule">
+    <strong>Règle :</strong> titres en Playfair Display Bold Italic (blanc sur fond noir), corps en Noto Sans Regular. Deux boutons-pilules : <em>outline blanc</em> (libellé italique) et <em>lime plein</em> (libellé italique souligné). L'electric lime n'habille jamais le corps du texte.
+  </div>
+</div>
+</body></html>

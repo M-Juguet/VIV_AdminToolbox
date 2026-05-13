@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>
+body{margin:0;padding:28px 30px;background:#ffffff;display:flex;flex-direction:column;gap:22px;}
+.label{font-family:var(--font-sans);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:var(--fg-3);margin:0 0 10px;}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center;}
+.block{display:flex;flex-direction:column;gap:10px;}
+.surface{padding:22px;border-radius:16px;}
+.surface--light{background:#F9F9F9;}
+.surface--dark{background:#000000;}
+
+.btn{
+  display:inline-flex; align-items:center; justify-content:center; gap:10px;
+  padding:13px 26px; border-radius:999px;
+  font-family:var(--font-sans); font-style:italic; font-weight:700; font-size:14px;
+  text-decoration:none; cursor:pointer;
+  transition:all .2s ease;
+  border:1px solid transparent;
+}
+
+/* Primary — lime solid, label underlined */
+.btn--lime{background:#C1F903; color:#000; border-color:#C1F903; text-decoration:underline; text-underline-offset:3px; text-decoration-thickness:1px;}
+.btn--lime:hover{background:#63A700; border-color:#63A700;}
+
+/* Secondary — black solid */
+.btn--black{background:#000; color:#fff; border-color:#000;}
+.btn--black:hover{background:#1A1A1A; border-color:#1A1A1A;}
+
+/* Tertiary — outline, adapts to surface */
+.btn--outline-dark{background:transparent; color:#000; border-color:rgba(0,0,0,0.5);}
+.btn--outline-dark:hover{background:#000; color:#fff; border-color:#000;}
+.btn--outline-light{background:transparent; color:#fff; border-color:rgba(255,255,255,0.5);}
+.btn--outline-light:hover{background:#fff; color:#000; border-color:#fff;}
+
+/* Pastille variant — circular icon wells */
+.pastille{
+  width:22px; height:22px; border-radius:50%;
+  display:inline-flex; align-items:center; justify-content:center;
+  flex-shrink:0;
+}
+.pastille--on-lime{background:#000; color:#C1F903;}
+.pastille--on-black{background:#C1F903; color:#000;}
+.pastille svg{width:11px;height:11px;}
+
+.note{font-family:var(--font-sans);font-size:11px;color:var(--fg-3);margin:0;line-height:1.5;}
+</style></head><body>
+
+<div class="block">
+  <p class="label">Primaire — lime, label souligné</p>
+  <div class="surface surface--light">
+    <div class="row">
+      <a class="btn btn--lime" href="#">Nos engagements</a>
+      <a class="btn btn--lime" href="#">
+        <span class="pastille pastille--on-lime">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </span>
+        En savoir plus
+      </a>
+    </div>
+  </div>
+</div>
+
+<div class="block">
+  <p class="label">Secondaire — noir plein</p>
+  <div class="surface surface--light">
+    <div class="row">
+      <a class="btn btn--black" href="#">Consulter</a>
+      <a class="btn btn--black" href="#">
+        <span class="pastille pastille--on-black">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </span>
+        Découvrir
+      </a>
+    </div>
+  </div>
+</div>
+
+<div class="block">
+  <p class="label">Outline — adaptatif</p>
+  <div class="surface surface--light" style="margin-bottom:10px;">
+    <div class="row">
+      <a class="btn btn--outline-dark" href="#">Voir plus</a>
+      <a class="btn btn--outline-dark" href="#">Découvrez nos talents</a>
+    </div>
+  </div>
+  <div class="surface surface--dark">
+    <div class="row">
+      <a class="btn btn--outline-light" href="#">Voir plus</a>
+      <a class="btn btn--outline-light" href="#">Découvrez nos talents</a>
+    </div>
+  </div>
+</div>
+
+<p class="note">
+  <strong>Règles :</strong> boutons en forme de pilule, libellés en Noto Sans Bold Italic.
+  Primaire lime avec libellé souligné. Secondaire noir plein.
+  Outline en blanc/50 % sur fond noir, en noir/50 % sur fond clair.
+  La pastille d'icône est un disque parfaitement circulaire, en contraste fort.
+</p>
+
+</body></html>

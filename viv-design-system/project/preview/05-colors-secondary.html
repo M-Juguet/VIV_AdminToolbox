@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>
+body{margin:0;padding:24px 26px;background:#fff;}
+.label{font-family:var(--font-sans);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:var(--fg-3);margin-bottom:10px;}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
+.sw{
+  border-radius:22px;
+  height:240px;
+  padding:22px;
+  display:flex;flex-direction:column;justify-content:space-between;
+  position:relative;
+  color:#000;
+}
+.sw--lime{background:#C1F903;}
+.sw--grey{background:#B6B6B6;}
+.sw--gradient{background:linear-gradient(180deg,#C1F903 0%,#63A700 100%);}
+.name{
+  font-family:var(--font-display);
+  font-weight:700;font-style:italic;
+  font-size:30px;line-height:1;
+  letter-spacing:-0.01em;
+}
+.specs{display:flex;flex-direction:column;gap:6px;font-family:var(--font-sans);font-size:12px;font-weight:500;}
+.spec-row{display:flex;align-items:baseline;gap:10px;}
+.spec-key{font-weight:700;width:44px;}
+.spec-val{font-family:ui-monospace,'SF Mono',monospace;font-size:11.5px;opacity:0.9;white-space:pre-line;}
+.source{font-family:var(--font-sans);font-size:11px;color:var(--fg-3);margin-top:14px;}
+</style></head><body>
+<div class="label">Couleurs secondaires</div>
+<div class="grid">
+  <div class="sw sw--lime">
+    <div class="name">Electric lime</div>
+    <div class="specs">
+      <div class="spec-row"><span class="spec-key">CMJN</span><span class="spec-val">22 · 0 · 99 · 2</span></div>
+      <div class="spec-row"><span class="spec-key">RVB</span><span class="spec-val">193 · 249 · 3</span></div>
+      <div class="spec-row"><span class="spec-key">HEXA</span><span class="spec-val">#C1F903</span></div>
+    </div>
+  </div>
+  <div class="sw sw--grey">
+    <div class="name">Light grey</div>
+    <div class="specs">
+      <div class="spec-row"><span class="spec-key">CMJN</span><span class="spec-val">0 · 0 · 0 · 29</span></div>
+      <div class="spec-row"><span class="spec-key">RVB</span><span class="spec-val">182 · 182 · 182</span></div>
+      <div class="spec-row"><span class="spec-key">HEXA</span><span class="spec-val">#B6B6B6</span></div>
+    </div>
+  </div>
+  <div class="sw sw--gradient">
+    <div class="name">Lime gradient</div>
+    <div class="specs">
+      <div class="spec-row"><span class="spec-key">CMJN</span><span class="spec-val">40 · 0 · 100 · 35
+22 · 0 · 99 · 2</span></div>
+      <div class="spec-row"><span class="spec-key">RVB</span><span class="spec-val">100 · 167 · 0
+193 · 249 · 3</span></div>
+      <div class="spec-row"><span class="spec-key">HEXA</span><span class="spec-val">#63A700
+#C1F903</span></div>
+    </div>
+  </div>
+</div>
+<div class="source">Source : Charte graphique VIV 2025 — Couleurs secondaires</div>
+</body></html>

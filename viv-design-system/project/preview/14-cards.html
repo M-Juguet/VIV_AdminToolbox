@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>
+body{margin:0;padding:24px;background:#F9F9F9;}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;}
+.card{
+  background:#000000;
+  border-radius:18px;
+  padding:18px;
+  display:flex; flex-direction:column; gap:16px;
+  color:#ffffff;
+}
+.media{
+  border-radius:12px;
+  aspect-ratio: 4 / 3;
+  background-size:cover; background-position:center;
+  background-color:#222;
+  background-image:
+    linear-gradient(135deg, rgba(40,40,40,0.85), rgba(80,80,80,0.7)),
+    radial-gradient(circle at 30% 40%, rgba(193,249,3,0.08), transparent 60%);
+  display:flex; align-items:flex-end; padding:14px;
+}
+.media__label{
+  font-family:var(--font-display); font-weight:700; font-style:italic;
+  font-size:14px; color:rgba(255,255,255,0.55);
+  letter-spacing:-0.01em;
+}
+.body{ display:flex; flex-direction:column; gap:14px; padding:0 6px 4px; flex:1; }
+.title{
+  font-family:var(--font-display); font-weight:700; font-style:italic;
+  font-size:26px; line-height:1.1; letter-spacing:-0.01em;
+  margin:0; color:#ffffff;
+}
+.copy{
+  margin:0; font-family:var(--font-sans); font-weight:400;
+  font-size:13.5px; line-height:1.55;
+  color:rgba(255,255,255,0.72);
+  flex:1;
+}
+.cta{
+  align-self:flex-start;
+  display:inline-flex; align-items:center; gap:8px;
+  padding:9px 18px; border-radius:999px;
+  border:1px solid rgba(255,255,255,0.4);
+  background:transparent; color:#ffffff;
+  font-family:var(--font-sans); font-size:12px; font-weight:500;
+  text-decoration:none;
+  font-style:italic;
+  transition: all .2s ease;
+}
+.cta:hover{ background:#ffffff; color:#000000; border-color:#ffffff; }
+.source{font-family:var(--font-sans);font-size:11px;color:var(--fg-3);margin-top:16px;}
+</style></head><body>
+<div class="grid">
+
+  <div class="card">
+    <div class="media"><span class="media__label">Portrait · design studio</span></div>
+    <div class="body">
+      <h3 class="title">Design</h3>
+      <p class="copy">Créatifs et exigeants, nos designers transforment les idées en expériences visuelles et produits sur mesure, alliant esthétique, innovation et performance au service de vos projets.</p>
+      <a class="cta" href="#">Découvrir nos talents</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="media"><span class="media__label">Collaboration · digital</span></div>
+    <div class="body">
+      <h3 class="title">Digital</h3>
+      <p class="copy">Nos talents du digital mobilisent l'ensemble des expertises en marketing et communication, e-commerce, production et post-production de contenus, ainsi qu'en coordination de projets digitaux, pour renforcer votre visibilité et votre impact en ligne.</p>
+      <a class="cta" href="#">Découvrir nos talents</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="media"><span class="media__label">Ambiance · IT workspace</span></div>
+    <div class="body">
+      <h3 class="title">Systèmes d'information</h3>
+      <p class="copy">Développeurs, data engineers ou chefs de projet IT : nos talents renforcent vos équipes des systèmes d'information pour des projets performants et sécurisés.</p>
+      <a class="cta" href="#">Découvrir nos talents</a>
+    </div>
+  </div>
+
+</div>
+<div class="source">Carte secteur — fond noir, photo encadrée (ratio 4:3, radius 12), titre Playfair Bold Italic, corps Noto Sans, CTA pill outline blanc italique.</div>
+</body></html>

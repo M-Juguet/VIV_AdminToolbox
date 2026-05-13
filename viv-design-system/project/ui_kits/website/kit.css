@@ -1,0 +1,243 @@
+/* VIV website kit — scoped styles. Depends on ../../colors_and_type.css tokens. */
+
+* { box-sizing: border-box; }
+
+.viv-app {
+  font-family: var(--font-sans);
+  color: var(--fg-1);
+  background: var(--bg-1);
+}
+
+.viv-container { max-width: 1280px; margin: 0 auto; padding: 0 var(--gutter); }
+
+/* ---------- Nav ---------- */
+.viv-nav {
+  position: sticky; top: 0; z-index: 50;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px clamp(20px, 4vw, 48px);
+  background: #000000;
+  border-bottom: 1px solid transparent;
+  transition: border-color var(--dur-base) var(--ease-out-soft);
+}
+.viv-nav.is-scrolled { border-bottom-color: rgba(255,255,255,0.08); }
+.viv-nav__logo img { height: 38px; display: block; }
+.viv-nav__links { display: flex; gap: 30px; list-style: none; margin: 0; padding: 0; }
+.viv-nav__links a {
+  text-decoration: none; color: #ffffff; font-size: 14px; font-weight: 500;
+  transition: color var(--dur-fast) var(--ease-out-soft);
+}
+.viv-nav__links a:hover { color: var(--viv-green); }
+
+/* ---------- Buttons ---------- */
+.viv-btn {
+  display: inline-flex; align-items: center; justify-content:center; gap: 10px;
+  padding: 13px 26px; border-radius: var(--radius-pill);
+  font-family: var(--font-sans); font-style: italic; font-weight: 700; font-size: 14px;
+  text-decoration: none; border: 1px solid transparent; cursor: pointer;
+  transition: all var(--dur-base) var(--ease-out-soft);
+}
+.viv-btn--primary {
+  background: var(--viv-green); color: var(--ink);
+  border-color: var(--viv-green);
+  text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px;
+}
+.viv-btn--primary:hover { background: var(--viv-green-600); border-color: var(--viv-green-600); }
+.viv-btn--primary:active { transform: scale(0.98); }
+.viv-btn--ghost-light {
+  background: transparent; color: #fff; border-color: rgba(255,255,255,0.5);
+}
+.viv-btn--ghost-light:hover { background:#fff; color:#000; border-color:#fff; }
+.viv-btn__pastille {
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--ink); color: var(--viv-green);
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.viv-btn__pastille svg { width: 11px; height: 11px; }
+
+/* ---------- Hero ---------- */
+.viv-hero {
+  background: var(--ink); color: #fff;
+  padding: clamp(64px, 9vw, 128px) clamp(20px, 4vw, 48px) clamp(80px, 10vw, 144px);
+  position: relative; overflow: hidden;
+}
+.viv-hero__inner { max-width: 1100px; position: relative; z-index: 2; }
+.viv-hero__title {
+  font-family: var(--font-display); font-weight: 700; font-style: italic;
+  font-size: clamp(2.4rem, 6vw, 5rem);
+  line-height: 1.03; letter-spacing: -0.028em;
+  margin: 0 0 28px; color: #fff; text-wrap: balance;
+}
+.viv-hero__title em { color: var(--viv-green); font-weight: 700; }
+.viv-hero__lead {
+  max-width: 620px; font-size: 17px; line-height: 1.6;
+  color: rgba(255,255,255,0.78); margin: 0 0 34px;
+}
+.viv-hero__ctas { display: flex; gap: 14px; flex-wrap: wrap; }
+.viv-hero__mark {
+  position: absolute; right: -40px; bottom: -40px;
+  width: 480px; opacity: 0.08; pointer-events: none;
+}
+.viv-hero__mark img { width: 100%; display: block; }
+
+/* ---------- Sections ---------- */
+.viv-section {
+  padding: clamp(64px, 9vw, 128px) clamp(20px, 4vw, 48px);
+  max-width: 1280px; margin: 0 auto;
+}
+.viv-section--tinted { max-width: none; background: var(--bg-2); }
+.viv-section--tinted .viv-section__head,
+.viv-section--tinted .viv-sector-grid { max-width: 1280px; margin-left: auto; margin-right: auto; }
+
+.viv-section__head { max-width: 760px; margin-bottom: 48px; }
+.viv-eyebrow {
+  display: inline-block;
+  font-size: 13px; font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--fg-3); margin-bottom: 14px;
+}
+.viv-eyebrow--on-dark { color: var(--viv-green); }
+.viv-h2 {
+  font-family: var(--font-display); font-weight: 700; font-style: italic;
+  font-size: clamp(2rem, 4vw, 3.25rem);
+  line-height: 1.1; letter-spacing: -0.022em;
+  margin: 0 0 18px; text-wrap: balance;
+}
+.viv-h2 em { color: var(--viv-green-600); font-weight: 700; }
+.viv-h2--on-dark { color: #fff; }
+.viv-h2--on-dark em { color: var(--viv-green); }
+.viv-section__lead { font-size: 17px; line-height: 1.6; color: var(--fg-2); max-width: 640px; }
+
+.viv-link {
+  font-size: 14px; font-weight: 600; text-decoration: none;
+  color: var(--ink); border-bottom: 1px solid var(--ink);
+  padding-bottom: 2px; transition: color var(--dur-fast);
+}
+.viv-link:hover { color: var(--viv-green-600); border-color: var(--viv-green-600); }
+
+/* ---------- Talent cards ---------- */
+.viv-talent-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+.viv-talent {
+  background: #fff; border-radius: var(--radius-lg); overflow: hidden;
+  box-shadow: var(--shadow-md);
+  transition: transform var(--dur-base) var(--ease-out-soft), box-shadow var(--dur-base);
+}
+.viv-talent:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); }
+.viv-talent__media {
+  aspect-ratio: 16/10; display: flex; align-items: flex-end; padding: 20px;
+}
+.viv-talent__media-label {
+  font-family: var(--font-display); font-size: 28px; font-weight: 700;
+  color: #fff; font-style: italic;
+}
+.viv-talent__body { padding: 22px 24px 26px; }
+.viv-talent__body h3 {
+  font-family: var(--font-display); font-weight: 700; font-style: italic; font-size: 24px;
+  margin: 0 0 10px; letter-spacing: -0.015em;
+}
+.viv-talent__body p { font-size: 14.5px; line-height: 1.6; color: var(--fg-2); margin: 0 0 18px; }
+
+/* ---------- Sectors ---------- */
+.viv-sector-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
+.viv-sector { margin: 0; text-align: center; }
+.viv-sector__media {
+  aspect-ratio: 3/4; border-radius: var(--radius-md);
+  display: flex; align-items: center; justify-content: center;
+  transition: transform var(--dur-base);
+}
+.viv-sector:hover .viv-sector__media { transform: scale(1.02); }
+.viv-sector__glyph {
+  font-family: var(--font-display); color: rgba(255,255,255,0.22);
+  font-size: 72px; font-weight: 500;
+}
+.viv-sector figcaption {
+  margin-top: 10px; font-size: 14px; font-weight: 600; color: var(--ink);
+}
+
+/* ---------- Engagements ---------- */
+.viv-engagement-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 32px; }
+.viv-engagement { }
+.viv-engagement__icon {
+  width: 64px; height: 64px; border-radius: var(--radius-md);
+  background: var(--viv-green); color: var(--ink);
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 18px;
+}
+.viv-engagement h3 {
+  font-family: var(--font-display); font-weight: 700; font-style: italic; font-size: 22px;
+  margin: 0 0 10px; letter-spacing: -0.01em;
+}
+.viv-engagement p { font-size: 14.5px; line-height: 1.6; color: var(--fg-2); margin: 0; }
+
+/* ---------- Contracts ---------- */
+.viv-contracts {
+  max-width: 1280px; margin: 0 auto;
+  padding: clamp(64px, 9vw, 128px) clamp(20px, 4vw, 48px);
+  display: grid; grid-template-columns: 1.2fr 1fr; gap: 48px; align-items: center;
+}
+.viv-contracts__copy h2 { margin-top: 8px; }
+.viv-contracts__copy p { color: var(--fg-2); margin: 10px 0 0; }
+.viv-contracts__chips { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
+.viv-chip {
+  border: 1px solid var(--border-1); background: #fff; color: var(--ink);
+  padding: 12px 22px; border-radius: var(--radius-pill);
+  font-family: var(--font-sans); font-size: 15px; font-weight: 500;
+  cursor: pointer; transition: all var(--dur-base);
+}
+.viv-chip:hover { border-color: var(--ink); }
+.viv-chip.is-active { background: var(--viv-green); border-color: var(--viv-green); }
+
+/* ---------- Secure band ---------- */
+.viv-secure { background: var(--ink); color: #fff; padding: clamp(72px,9vw,128px) clamp(20px,4vw,48px); }
+.viv-secure__inner { max-width: 1000px; margin: 0 auto; text-align: left; }
+.viv-secure__lead { font-size: 18px; line-height: 1.6; color: rgba(255,255,255,0.72); margin: 0 0 36px; max-width: 640px; }
+.viv-secure__pillars { display: grid; grid-template-columns: repeat(3,1fr); gap: 28px; margin-bottom: 36px; padding-top: 28px; border-top: 1px solid rgba(255,255,255,0.12); }
+.viv-secure__pillars h4 { font-family: var(--font-sans); font-size: 16px; font-weight: 600; margin: 0 0 6px; color: var(--viv-green); }
+.viv-secure__pillars p { font-size: 14px; line-height: 1.55; color: rgba(255,255,255,0.72); margin: 0; }
+
+/* ---------- Certs ---------- */
+.viv-certs {
+  max-width: 1280px; margin: 0 auto;
+  padding: clamp(64px, 9vw, 128px) clamp(20px, 4vw, 48px);
+  text-align: center;
+}
+.viv-certs .viv-eyebrow { margin-bottom: 32px; }
+.viv-certs__row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 36px; text-align: left; }
+.viv-cert { display: flex; gap: 20px; align-items: flex-start; }
+.viv-cert__badge {
+  flex-shrink: 0; width: 84px; height: 84px;
+  border-radius: 50%; background: var(--bg-2);
+  display: flex; align-items: center; justify-content: center;
+  text-align: center; font-family: var(--font-display); font-size: 13px; font-weight: 500;
+  line-height: 1.1; color: var(--ink);
+}
+.viv-cert__badge--gold { background: linear-gradient(135deg,#E8C978,#B8902F); color: #1a1200; }
+.viv-cert__badge small { font-size: 10px; opacity: 0.8; }
+.viv-cert__badge strong { display:block; font-size: 20px; margin-top: 2px; }
+.viv-cert p { font-size: 14px; line-height: 1.55; color: var(--fg-2); margin: 4px 0 0; }
+
+/* ---------- Footer ---------- */
+.viv-footer { background: var(--ink); color: rgba(255,255,255,0.72); padding: 72px clamp(20px,4vw,48px) 28px; }
+.viv-footer__top {
+  max-width: 1280px; margin: 0 auto;
+  display: grid; grid-template-columns: 1.6fr 1fr 1fr 1fr; gap: 48px;
+  padding-bottom: 48px; border-bottom: 1px solid rgba(255,255,255,0.12);
+}
+.viv-footer__brand img { height: 40px; margin-bottom: 18px; }
+.viv-footer__brand p { font-size: 14px; line-height: 1.6; margin: 0; max-width: 360px; }
+.viv-footer h5 { font-family: var(--font-sans); font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #fff; margin: 0 0 16px; }
+.viv-footer ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; font-size: 14px; }
+.viv-footer ul a { color: rgba(255,255,255,0.72); text-decoration: none; }
+.viv-footer ul a:hover { color: var(--viv-green); }
+.viv-footer__bottom { max-width: 1280px; margin: 24px auto 0; display: flex; justify-content: space-between; font-size: 12px; }
+.viv-footer__social { display: flex; gap: 18px; }
+.viv-footer__social a { color: rgba(255,255,255,0.72); text-decoration: none; }
+.viv-footer__social a:hover { color: var(--viv-green); }
+
+@media (max-width: 900px) {
+  .viv-nav__links { display: none; }
+  .viv-talent-grid, .viv-engagement-grid, .viv-certs__row { grid-template-columns: 1fr 1fr; }
+  .viv-sector-grid { grid-template-columns: repeat(3, 1fr); }
+  .viv-contracts { grid-template-columns: 1fr; }
+  .viv-contracts__chips { justify-content: flex-start; }
+  .viv-secure__pillars, .viv-footer__top { grid-template-columns: 1fr 1fr; }
+}

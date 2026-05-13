@@ -1,0 +1,282 @@
+/* ============================================================
+   VIV Design System — Core Tokens
+   Source: viv-prod.com, logo assets
+   ============================================================ */
+
+/* Brand fonts — local files provided by VIV */
+@font-face {
+  font-family: 'Playfair Display';
+  font-style: italic;
+  font-weight: 700;
+  font-display: swap;
+  src: url('fonts/PlayfairDisplay-BoldItalic.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Noto Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('fonts/NotoSans-Regular.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Noto Sans';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url('fonts/NotoSans-Italic.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Noto Sans';
+  font-style: italic;
+  font-weight: 700;
+  font-display: swap;
+  src: url('fonts/NotoSans-BoldItalic.ttf') format('truetype');
+}
+
+/* Google Fonts fallback covers any weight/style not provided as local file
+   (Noto Sans Light 300, Noto Sans Bold 700 upright, extra Playfair weights). */
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600&family=Noto+Sans:ital,wght@0,300;0,500;0,600;0,700;1,300;1,500;1,600;1,700&display=swap');
+
+:root {
+  /* ============================================================
+     CANONICAL TOKENS — VIV Charte graphique 2025
+     ============================================================ */
+
+  /* ---------- BRAND COLORS — PRIMARY ---------- */
+  /* Two primary colors per the charte: pure black + electric lime. */
+  --viv-black:        #000000;  /* Primary · Black · CMJN 0-0-0-100 */
+  --viv-lime:         #C1F903;  /* Primary · Electric lime · CMJN 22-0-99-2 */
+
+  /* Aliases kept for backward compatibility with existing files */
+  --viv-green:        #C1F903;
+  --viv-green-600:    #63A700;  /* matches "Lime" secondary; used for pressed/hover */
+  --viv-green-300:    #DAFB6C;
+  --viv-green-100:    #F0FDBA;
+
+  /* ---------- BRAND COLORS — SECONDARY ---------- */
+  --viv-offwhite:     #F9F9F9;  /* Secondary · Off-white · CMJN 0-0-0-2 */
+  --viv-lightgrey:    #B6B6B6;  /* Secondary · Light grey · CMJN 0-0-0-29 */
+  --viv-lime-deep:    #63A700;  /* Secondary · Lime · CMJN 40-0-100-35 */
+
+  /* Signature lime gradient — the charte calls it out as a named color */
+  --viv-lime-gradient: linear-gradient(135deg, #C1F903 0%, #63A700 100%);
+
+  /* ---------- NEUTRAL RAMP (kept for UI nuance) ---------- */
+  --ink:              #000000;  /* now pure black per charte */
+  --ink-900:          #0A0A0A;
+  --ink-800:          #1A1A1A;
+  --ink-700:          #2B2B2B;
+
+  --gray-500:         #6B6B6B;
+  --gray-400:         #8A8A8A;
+  --gray-300:         #B6B6B6;  /* aligned to charte light-grey */
+  --gray-200:         #D9D9D9;
+  --gray-100:         #ECECEC;
+  --gray-50:          #F9F9F9;  /* aligned to charte off-white */
+
+  --paper:            #FFFFFF;
+
+  /* ---------- SEMANTIC FG/BG ---------- */
+  --fg-1:             var(--ink);
+  --fg-2:             #3A3A3A;      /* secondary text */
+  --fg-3:             var(--gray-500);
+  --fg-inverted:      var(--paper);
+  --fg-accent:        var(--viv-green);
+
+  --bg-1:             var(--paper);
+  --bg-2:             var(--gray-50);
+  --bg-inverted:      var(--ink);
+  --bg-accent:        var(--viv-green);
+
+  --border-1:         rgba(10,10,10,0.12);
+  --border-2:         rgba(10,10,10,0.06);
+  --border-on-dark:   rgba(255,255,255,0.14);
+
+  /* ---------- STATUS ---------- */
+  /* The VIV charte doesn't define semantic status colors.
+     If a UI absolutely needs them, derive quietly and keep them
+     out of marketing surfaces. Not surfaced as preview cards. */
+
+  /* ---------- TYPOGRAPHY — canonical per charte ---------- */
+  /* Principal: Playfair Display Bold Italic. High-contrast didone serif.
+     Used for all headlines (Titre) and for names/prenoms/titles (poste). */
+  --font-display:     'Playfair Display', Georgia, 'Times New Roman', serif;
+
+  /* Secondary: Noto Sans. Humanist geometric sans. Subtitles, body, quotes. */
+  --font-sans:        'Noto Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  --font-mono:        ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+
+  /* Scale */
+  --fs-hero:          clamp(3rem, 6vw, 5.5rem);    /* 48→88 */
+  --fs-display:       clamp(2.25rem, 4.5vw, 4rem); /* 36→64 */
+  --fs-h1:            2.5rem;   /* 40 */
+  --fs-h2:            2rem;     /* 32 */
+  --fs-h3:            1.5rem;   /* 24 */
+  --fs-h4:            1.25rem;  /* 20 */
+  --fs-lead:          1.125rem; /* 18 */
+  --fs-body:          1rem;     /* 16 */
+  --fs-small:         0.875rem; /* 14 */
+  --fs-caps:          0.75rem;  /* 12 */
+
+  --lh-tight:         1.05;
+  --lh-display:       1.1;
+  --lh-heading:       1.2;
+  --lh-body:          1.6;
+
+  --tracking-tight:   -0.02em;
+  --tracking-normal:  0;
+  --tracking-caps:    0.08em;
+
+  /* ---------- SPACING ---------- */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  24px;
+  --space-6:  32px;
+  --space-7:  48px;
+  --space-8:  64px;
+  --space-9:  96px;
+  --space-10: 128px;
+
+  /* ---------- RADII ---------- */
+  /* VIV leans soft but not playful. Cards and buttons use
+     generous but restrained curvature; pill shapes appear
+     for tags/section chips. */
+  --radius-sm:   6px;
+  --radius-md:   12px;
+  --radius-lg:   20px;
+  --radius-xl:   32px;
+  --radius-pill: 999px;
+
+  /* ---------- SHADOWS ---------- */
+  --shadow-sm:  0 1px 2px rgba(10,10,10,0.04), 0 1px 1px rgba(10,10,10,0.03);
+  --shadow-md:  0 4px 12px rgba(10,10,10,0.06), 0 2px 4px rgba(10,10,10,0.04);
+  --shadow-lg:  0 16px 40px rgba(10,10,10,0.08), 0 4px 8px rgba(10,10,10,0.04);
+  --shadow-glow: 0 0 0 4px rgba(193,249,3,0.3);
+
+  /* ---------- MOTION ---------- */
+  --ease-out-soft:  cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-in-out:    cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast:       120ms;
+  --dur-base:       220ms;
+  --dur-slow:       480ms;
+
+  /* ---------- LAYOUT ---------- */
+  --container:      1280px;
+  --container-wide: 1440px;
+  --gutter:         clamp(16px, 3vw, 48px);
+}
+
+/* ============================================================
+   Semantic element defaults
+   ============================================================ */
+
+html { color-scheme: light; }
+
+body {
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--fg-1);
+  background: var(--bg-1);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Per charte: Titres = Playfair Display Bold Italic. */
+h1, h2, h3, .display {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-style: italic;
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--lh-display);
+  color: var(--fg-1);
+  text-wrap: balance;
+}
+
+.hero-title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-style: italic;
+  font-size: var(--fs-hero);
+  line-height: var(--lh-tight);
+  letter-spacing: -0.025em;
+}
+
+h1 { font-size: var(--fs-h1); }
+h2 { font-size: var(--fs-h2); }
+h3 { font-size: var(--fs-h3); }
+/* Sous-titre = Noto Sans Bold Italic per charte */
+h4, .subtitle {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  font-style: italic;
+  font-size: var(--fs-h4);
+  letter-spacing: 0;
+  line-height: 1.3;
+}
+
+/* Corps de texte = Noto Sans Regular */
+p { font-family: var(--font-sans); font-weight: 400; color: var(--fg-2); line-height: var(--lh-body); text-wrap: pretty; }
+p.lead { font-size: var(--fs-lead); color: var(--fg-1); }
+
+/* Citation = Noto Sans Italic per charte */
+blockquote, .quote {
+  font-family: var(--font-sans);
+  font-style: italic;
+  font-weight: 400;
+  font-size: var(--fs-lead);
+  color: var(--fg-1);
+  line-height: 1.55;
+  border-left: 3px solid var(--viv-lime);
+  padding-left: 18px;
+  margin: 0;
+}
+
+/* Annotations secondaires = Noto Sans Light */
+.annotation {
+  font-family: var(--font-sans);
+  font-weight: 300;
+  font-size: var(--fs-small);
+  color: var(--fg-3);
+}
+
+.eyebrow {
+  font-family: var(--font-sans);
+  font-size: var(--fs-caps);
+  font-weight: 600;
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+
+code, pre, kbd {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+
+a {
+  color: var(--fg-1);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  transition: color var(--dur-fast) var(--ease-out-soft);
+}
+a:hover { color: var(--viv-green-600); }
+
+/* Reusable capsule/tag */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px 14px;
+  font-size: var(--fs-small);
+  font-weight: 500;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-1);
+  background: var(--bg-1);
+  color: var(--fg-1);
+}
+.chip--green { background: var(--viv-green); border-color: var(--viv-green); }
+.chip--dark  { background: var(--ink); border-color: var(--ink); color: var(--paper); }
