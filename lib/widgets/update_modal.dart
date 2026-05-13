@@ -5,6 +5,7 @@ import '../design_system/viv_colors.dart';
 import '../design_system/viv_spacing.dart';
 import '../design_system/viv_typography.dart';
 import '../providers/update_provider.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 
 class UpdateModal extends ConsumerWidget {
   const UpdateModal({super.key});
@@ -60,18 +61,22 @@ class UpdateModal extends ConsumerWidget {
               const SizedBox(height: VivSpacing.space2),
               Container(
                 width: double.infinity,
+                constraints: const BoxConstraints(maxHeight: 250),
                 padding: const EdgeInsets.all(VivSpacing.space3),
                 decoration: BoxDecoration(
                   color: VivColors.gray100,
                   borderRadius: BorderRadius.circular(VivSpacing.radiusMd),
                 ),
-                child: Text(
-                  updateState.release!.body.isEmpty 
-                      ? 'Améliorations et corrections de bugs.' 
-                      : updateState.release!.body,
-                  style: VivTypography.small,
-                  maxLines: 5,
-                  overflow: TextOverflow.ellipsis,
+                child: SingleChildScrollView(
+                  child: MarkdownBody(
+                    data: updateState.release!.body.isEmpty 
+                        ? 'Améliorations et corrections de bugs.' 
+                        : updateState.release!.body,
+                    styleSheet: MarkdownStyleSheet(
+                      p: VivTypography.small,
+                      listBullet: VivTypography.small,
+                    ),
+                  ),
                 ),
               ),
             ],

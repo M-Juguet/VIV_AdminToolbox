@@ -286,9 +286,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             );
                           }
                         } else if (ref.read(updateProvider).status == UpdateState.available) {
-                          if (context.mounted) {
-                            showUpdateDialog(context);
-                          }
+                          // La modale est affichée globalement par l'écouteur de MainShell.
                         } else if (ref.read(updateProvider).status == UpdateState.error) {
                           if (context.mounted) {
                             ShadToaster.of(context).show(
