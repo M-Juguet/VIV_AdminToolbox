@@ -420,7 +420,19 @@ class _MainShellState extends ConsumerState<MainShell> {
                                 ),
                                 onPressed: () {},
                               ),
-                              const SizedBox(width: VivSpacing.space6),
+                              const SizedBox(width: VivSpacing.space2),
+                              IconButton(
+                                icon: const Icon(
+                                  LucideIcons.x,
+                                  size: 20,
+                                  color: VivColors.gray500,
+                                ),
+                                hoverColor: Colors.red.withValues(alpha: 0.1),
+                                onPressed: () async {
+                                  await windowManager.close();
+                                },
+                              ),
+                              const SizedBox(width: VivSpacing.space4),
                             ],
                           );
                         },

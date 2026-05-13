@@ -1,5 +1,5 @@
 #define MyAppName "VIV Admin Toolbox"
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "0.1.2"
 #define MyAppPublisher "M-Juguet"
 #define MyAppExeName "opsis_app.exe"
 #define AppId "{{8E9E40B7-7A2D-4B81-9A32-9F1F350711B8}"
@@ -16,12 +16,13 @@ PrivilegesRequired=lowest
 DefaultDirName={userpf}\{#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=.\installers
-OutputBaseFilename=opsis_update_v0.1.0
+OutputBaseFilename=opsis_update
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
 ; Ferme automatiquement l'application avant d'écraser les fichiers lors d'une mise à jour
 CloseApplications=force
+SetupIconFile=windows\runner\resources\app_icon.ico
 
 [Languages]
 Name: "french"; MessagesFile: "compiler:Languages\French.isl"
