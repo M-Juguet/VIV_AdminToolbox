@@ -4,6 +4,12 @@ import '../design_system/viv_colors.dart';
 import '../design_system/viv_spacing.dart';
 import '../design_system/viv_typography.dart';
 import 'tools/resource_finder_screen.dart';
+import 'tools/bdc_diagnostic_screen.dart';
+import 'tools/data_extraction_widget.dart';
+import 'tools/api_quota_diagnostic_screen.dart';
+import 'tools/bdc_rules_diagnostic_screen.dart';
+import '../services/bdc_sent_logs_service.dart';
+
 
 class ToolboxScreen extends StatelessWidget {
   const ToolboxScreen({super.key});
@@ -86,6 +92,54 @@ class ToolboxScreen extends StatelessWidget {
                 status: ToolStatus.wip,
               ),
               _ToolDefinition(
+                title: "Diagnostic BDC",
+                description:
+                    "Outil temporaire pour tester les inclusions d'API BoondManager et analyser les retours JSON bruts.",
+                icon: LucideIcons.shieldAlert,
+                onPressed: () {
+                  showDialog(
+                    context: context,
+                    barrierDismissible: true,
+                    builder: (context) => Center(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 40),
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 1000, maxHeight: 850),
+                          child: BdcDiagnosticScreen(
+                            onClose: () => Navigator.of(context).pop(),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+                status: ToolStatus.wip,
+              ),
+              _ToolDefinition(
+                title: "Configuration Règles BDC",
+                description:
+                    "Outil de test pour configurer et visualiser les règles de calcul spécifiques des UO et des libellés.",
+                icon: LucideIcons.pencilRuler,
+                onPressed: () {
+                  showDialog(
+                    context: context,
+                    barrierDismissible: true,
+                    builder: (context) => Center(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 40),
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 1050, maxHeight: 880),
+                          child: BdcRulesDiagnosticScreen(
+                            onClose: () => Navigator.of(context).pop(),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+                status: ToolStatus.wip,
+              ),
+              _ToolDefinition(
                 title: "Alertes CRA manquants",
                 description:
                     "Identifier les prestataires n'ayant pas encore renseigné leurs temps sur le mois en cours.",
@@ -94,6 +148,72 @@ class ToolboxScreen extends StatelessWidget {
                   // Prochainement
                 },
                 status: ToolStatus.comingSoon,
+              ),
+              _ToolDefinition(
+                title: "Alerte 80% temps signé",
+                description:
+                    "Alerter quand un consultant consomme 80% du temps signé.",
+                icon: LucideIcons.bell,
+                onPressed: () {
+                  // Prochainement
+                },
+                status: ToolStatus.comingSoon,
+              ),
+              _ToolDefinition(
+                title: "Diagnostic Quotas API",
+                description:
+                    "Analyser les en-têtes HTTP de BoondManager pour tester la détection de quotas.",
+                icon: LucideIcons.activity,
+                onPressed: () {
+                  showDialog(
+                    context: context,
+                    barrierDismissible: true,
+                    builder: (context) => Center(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 40),
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 800, maxHeight: 750),
+                          child: ApiQuotaDiagnosticScreen(
+                            onClose: () => Navigator.of(context).pop(),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+                status: ToolStatus.wip,
+              ),
+            ],
+          ),
+          const SizedBox(height: VivSpacing.space8),
+          _buildCategory(
+            context,
+            title: "Extractions de données",
+            icon: LucideIcons.download,
+            tools: [
+              _ToolDefinition(
+                title: "Extracteur BoondManager",
+                description:
+                    "Extraire des fichiers CSV paginés complets directement depuis BoondManager pour alimenter vos analyses.",
+                icon: LucideIcons.fileSpreadsheet,
+                onPressed: () {
+                  showDialog(
+                    context: context,
+                    barrierDismissible: true,
+                    builder: (context) => Center(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 40),
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 650, maxHeight: 850),
+                          child: DataExtractionWidget(
+                            onClose: () => Navigator.of(context).pop(),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+                status: ToolStatus.wip,
               ),
             ],
           ),
@@ -113,9 +233,74 @@ class ToolboxScreen extends StatelessWidget {
                 },
                 status: ToolStatus.wip,
               ),
+              _ToolDefinition(
+                title: "Nettoyage base BDC",
+                description:
+                    "Supprimer l'historique d'envoi et les PDF archivés localement pour réinitialiser le module BDC (Mode Démo).",
+                icon: LucideIcons.trash2,
+                onPressed: () {
+                  _showResetBdcDialog(context);
+                },
+                status: ToolStatus.wip,
+              ),
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  void _showResetBdcDialog(BuildContext context) {
+    final toaster = ShadToaster.of(context);
+    
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) => Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 450),
+          child: ShadCard(
+            title: const Text("Réinitialiser l'historique BDC"),
+            description: const Text(
+              "Attention, cette action va vider complètement la base de données locale des bons envoyés et supprimer physiquement tous les fichiers PDF de BDC archivés sur votre ordinateur. Cela permet de recommencer une démo à blanc.",
+            ),
+            footer: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                ShadButton.outline(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text("Annuler"),
+                ),
+                const SizedBox(width: 8),
+                ShadButton.destructive(
+                  onPressed: () async {
+                    Navigator.of(dialogContext).pop();
+                    try {
+                      await BdcSentLogsService().clearAllSentLogs();
+                      
+                      toaster.show(
+                        const ShadToast(
+                          title: Text("Nettoyage effectué"),
+                          description: Text("L'historique des BDC et les fichiers PDF locaux ont été supprimés avec succès."),
+                          backgroundColor: Colors.teal,
+                        ),
+                      );
+                    } catch (e) {
+                      toaster.show(
+                        ShadToast.destructive(
+                          title: const Text("Erreur"),
+                          description: Text("Une erreur s'est produite lors de la purge : $e"),
+                        ),
+                      );
+                    }
+                  },
+                  child: const Text("Confirmer la purge"),
+                ),
+              ],
+            ),
+            child: const SizedBox(height: 12),
+          ),
+        ),
       ),
     );
   }

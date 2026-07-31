@@ -42,11 +42,10 @@ class DashboardNotifier extends Notifier<DashboardStats> {
     await refresh();
   }
 
-  /// Initialisation intelligente : ne charge que si les données sont absentes
+  /// Initialisation intelligente (désactivée pour économiser l'API)
   Future<void> init() async {
-    if (state.agencies.isEmpty && !state.isLoading) {
-      await refresh();
-    }
+    // Les appels automatiques au chargement sont désactivés.
+    // L'utilisateur doit initier la synchronisation manuellement.
   }
 
   Future<void> refresh({bool onlyCompliance = false}) async {
@@ -471,12 +470,14 @@ class DashboardNotifier extends Notifier<DashboardStats> {
         agencies: agencies,
         selectedAgencyId: activeAgencyId,
         selectedAgencyName: activeAgencyName,
+        isInitialized: true,
       );
     } catch (e) {
       state = state.copyWith(
         isLoading: false,
         isComplianceLoading: false,
         error: e.toString(),
+        isInitialized: true,
       );
     }
   }

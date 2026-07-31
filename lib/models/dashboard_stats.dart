@@ -14,6 +14,7 @@ class DashboardStats {
   final List<Map<String, String>> agencies;
   final String? selectedAgencyId;
   final String? selectedAgencyName;
+  final bool isInitialized; // Indique si le chargement a déjà été effectué au moins une fois
 
   DashboardStats({
     DateTime? selectedMonth,
@@ -31,6 +32,7 @@ class DashboardStats {
     this.agencies = const [],
     this.selectedAgencyId,
     this.selectedAgencyName,
+    this.isInitialized = false,
   }) : selectedMonth = selectedMonth ?? DateTime(DateTime.now().year, DateTime.now().month, 1);
 
   DashboardStats copyWith({
@@ -50,6 +52,7 @@ class DashboardStats {
     List<Map<String, String>>? agencies,
     String? selectedAgencyId,
     String? selectedAgencyName,
+    bool? isInitialized,
   }) {
     return DashboardStats(
       selectedMonth: selectedMonth ?? this.selectedMonth,
@@ -67,6 +70,7 @@ class DashboardStats {
       agencies: agencies ?? this.agencies,
       selectedAgencyId: selectedAgencyId ?? this.selectedAgencyId,
       selectedAgencyName: selectedAgencyName ?? this.selectedAgencyName,
+      isInitialized: isInitialized ?? this.isInitialized,
     );
   }
 }

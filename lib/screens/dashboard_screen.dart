@@ -33,15 +33,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     final stats = ref.watch(dashboardProvider);
     final isConfigured = settings.boondUrl.isNotEmpty && settings.boondUser.isNotEmpty;
 
-    // Écouter les changements de réglages pour rafraîchir si nécessaire
-    ref.listen(settingsProvider, (prev, next) {
-      if (next.boondUrl.isNotEmpty && next.boondUser.isNotEmpty) {
-        if (prev == null || prev.boondUrl.isEmpty || prev.boondUser.isEmpty) {
-          ref.read(dashboardProvider.notifier).refresh();
-        }
-      }
-    });
-
     return SingleChildScrollView(
       padding: const EdgeInsets.all(VivSpacing.space6),
       child: Column(
@@ -54,17 +45,29 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               child: _buildErrorState(stats.error!),
             )
           else if (isConfigured) // Uniquement si configuré
-            Column(
-              children: [
-                const SizedBox(height: VivSpacing.space6),
-                _buildStatsGrid(stats),
-                const SizedBox(height: VivSpacing.space4),
-                _buildCalendarGrid(stats),
-                const SizedBox(height: VivSpacing.space8),
-                _buildAlertsSection(stats),
-                const SizedBox(height: VivSpacing.space8),
-              ],
-            )
+            if (!stats.isInitialized && !stats.isLoading)
+              _buildManualLoadPrompt()
+            else if (stats.isLoading && !stats.isInitialized)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 80),
+                child: Center(
+                  child: CircularProgressIndicator(
+                    color: VivColors.lime,
+                  ),
+                ),
+              )
+            else
+              Column(
+                children: [
+                  const SizedBox(height: VivSpacing.space6),
+                  _buildStatsGrid(stats),
+                  const SizedBox(height: VivSpacing.space4),
+                  _buildCalendarGrid(stats),
+                  const SizedBox(height: VivSpacing.space8),
+                  _buildAlertsSection(stats),
+                  const SizedBox(height: VivSpacing.space8),
+                ],
+              )
           else // Message d'invitation si non configuré
             _buildEmptyState(),
         ],
@@ -229,9 +232,20 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         ),
         Row(
           children: [
-            // Bouton de rafraîchissement global retiré ici selon demande utilisateur
+            if (isConfigured && stats.isInitialized)
+              ShadButton.outline(
+                onPressed: stats.isLoading
+                    ? null
+                    : () => ref.read(dashboardProvider.notifier).refresh(),
+                child: const Row(
+                  children: [
+                    Icon(LucideIcons.refreshCcw, size: 14),
+                    SizedBox(width: 8),
+                    Text("Actualiser"),
+                  ],
+                ),
+              ),
             const SizedBox(width: 8),
-            const SizedBox(),
           ],
         ),
       ],
@@ -526,6 +540,67 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
     return RichText(
       text: TextSpan(style: baseStyle, children: spans),
+    );
+  }
+
+  Widget _buildManualLoadPrompt() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 80),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 400),
+          child: ShadCard(
+            padding: const EdgeInsets.all(VivSpacing.space8),
+            backgroundColor: VivColors.paper,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: VivColors.lime.withValues(alpha: 0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    LucideIcons.refreshCcw,
+                    size: 40,
+                    color: VivColors.lime,
+                  ),
+                ),
+                const SizedBox(height: VivSpacing.space6),
+                Text(
+                  "Synchronisation requise",
+                  style: VivTypography.h3,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: VivSpacing.space4),
+                Text(
+                  "Afin de préserver vos quotas d'appels API BoondManager, les indicateurs et alertes de conformité ne sont pas chargés automatiquement.",
+                  textAlign: TextAlign.center,
+                  style: VivTypography.small.copyWith(
+                    color: VivColors.gray500,
+                    height: 1.5,
+                  ),
+                ),
+                const SizedBox(height: VivSpacing.space8),
+                ShadButton(
+                  onPressed: () {
+                    ref.read(dashboardProvider.notifier).refresh();
+                  },
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(LucideIcons.play, size: 16),
+                      SizedBox(width: 8),
+                      Text("Charger les données"),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

@@ -7,7 +7,7 @@ import '../../design_system/viv_typography.dart';
 import '../../providers/settings_provider.dart';
 import '../../services/boond_service.dart';
 import '../providers/update_provider.dart';
-import '../widgets/update_modal.dart';
+
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -36,14 +36,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
 
     try {
-      await service.testConnection();
+      final profile = await service.getCurrentUserProfile();
       if (mounted) {
-        try {
-          final profile = await service.getCurrentUserProfile();
-          _saveSettings(profile: profile);
-        } catch (e) {
-          _saveSettings();
-        }
+        _saveSettings(profile: profile);
       }
     } catch (e) {
       if (mounted) {

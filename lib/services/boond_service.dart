@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/settings_provider.dart';
+import 'boond_cache_service.dart';
 
 final boondServiceProvider = Provider((ref) {
   final settings = ref.watch(settingsProvider);
@@ -36,21 +37,43 @@ class BoondService {
     );
   }
 
-  /// Récupère le profil de l'utilisateur connecté
-  Future<Map<String, dynamic>> getCurrentUserProfile() async {
+  /// Récupère le profil de l'utilisateur connecté avec cache
+  Future<Map<String, dynamic>> getCurrentUserProfile({bool forceRefresh = false}) async {
+    const cacheKey = 'currentUserProfile';
+    final cache = BoondCacheService();
+    if (!forceRefresh) {
+      final cachedData = await cache.get(cacheKey);
+      if (cachedData != null) {
+        return Map<String, dynamic>.from(cachedData);
+      }
+    }
+
     try {
       final response = await _dio.get('application/currentUser');
-      return response.data['data'];
+      final data = response.data['data'] as Map<String, dynamic>;
+      await cache.put(cacheKey, data);
+      return data;
     } catch (e) {
       throw 'Erreur lors de la récupération du profil : $e';
     }
   }
 
-  /// Récupère le dictionnaire complet (référentiels)
-  Future<Map<String, dynamic>> getDictionary() async {
+  /// Récupère le dictionnaire complet (référentiels) avec cache
+  Future<Map<String, dynamic>> getDictionary({bool forceRefresh = false}) async {
+    const cacheKey = 'dictionary';
+    final cache = BoondCacheService();
+    if (!forceRefresh) {
+      final cachedData = await cache.get(cacheKey);
+      if (cachedData != null) {
+        return Map<String, dynamic>.from(cachedData);
+      }
+    }
+
     try {
       final response = await _dio.get('application/dictionary');
-      return response.data;
+      final data = response.data as Map<String, dynamic>;
+      await cache.put(cacheKey, data);
+      return data;
     } catch (e) {
       throw 'Erreur lors de la récupération du dictionnaire : $e';
     }
@@ -62,6 +85,72 @@ class BoondService {
       return response.data['data'];
     } catch (e) {
       throw 'Erreur lors de la récupération des projets : $e';
+    }
+  }
+
+  /// Récupère la liste des projets avec inclusions relationnelles (ex: include=deliveries,company) avec cache
+  Future<Map<String, dynamic>> getProjectsWithInclusions({
+    Map<String, dynamic>? filters,
+    List<String>? inclusions,
+    bool forceRefresh = false,
+  }) async {
+    final Map<String, dynamic> params = Map.from(filters ?? {});
+    if (inclusions != null && inclusions.isNotEmpty) {
+      params['include'] = inclusions.join(',');
+    }
+
+    // Générer une clé de cache unique basée sur les paramètres
+    final cacheKey = 'projects_${jsonEncode(params)}';
+    final cache = BoondCacheService();
+
+    if (!forceRefresh) {
+      final cachedData = await cache.get(cacheKey);
+      if (cachedData != null) {
+        return Map<String, dynamic>.from(cachedData);
+      }
+    }
+
+    try {
+      final response = await _dio.get('projects', queryParameters: params);
+      final data = response.data as Map<String, dynamic>;
+      await cache.put(cacheKey, data);
+      return data;
+    } catch (e) {
+      throw 'Erreur lors de la récupération des projets avec inclusions : $e';
+    }
+  }
+
+  /// Récupère un projet spécifique par son ID avec inclusions relationnelles (ex: include=company)
+  Future<Map<String, dynamic>> getProjectWithInclusions(
+    int id, {
+    List<String>? inclusions,
+  }) async {
+    try {
+      final Map<String, dynamic> params = {};
+      if (inclusions != null && inclusions.isNotEmpty) {
+        params['include'] = inclusions.join(',');
+      }
+      final response = await _dio.get('projects/$id', queryParameters: params);
+      return response.data;
+    } catch (e) {
+      throw 'Erreur lors de la récupération du projet $id : $e';
+    }
+  }
+
+  /// Récupère la liste des achats avec inclusions relationnelles (ex: include=project,providerCompany)
+  Future<Map<String, dynamic>> getPurchasesWithInclusions({
+    Map<String, dynamic>? filters,
+    List<String>? inclusions,
+  }) async {
+    try {
+      final Map<String, dynamic> params = Map.from(filters ?? {});
+      if (inclusions != null && inclusions.isNotEmpty) {
+        params['include'] = inclusions.join(',');
+      }
+      final response = await _dio.get('purchases', queryParameters: params);
+      return response.data;
+    } catch (e) {
+      throw 'Erreur lors de la récupération des achats avec inclusions : $e';
     }
   }
 
@@ -85,6 +174,18 @@ class BoondService {
       rethrow;
     } catch (e) {
       throw e.toString();
+    }
+  }
+
+  /// Récupère la liste des prestations (deliveries) globales ou filtrées
+  Future<Map<String, dynamic>> getDeliveriesWithFilters({
+    Map<String, dynamic>? filters,
+  }) async {
+    try {
+      final response = await _dio.get('deliveries', queryParameters: filters);
+      return response.data;
+    } catch (e) {
+      throw 'Erreur lors de la récupération des prestations : $e';
     }
   }
 
@@ -121,8 +222,18 @@ class BoondService {
     }
   }
 
-  /// Récupère les jours fériés et week-ends pour une période donnée
-  Future<List<String>> getHolidays(int year, {String? agencyId}) async {
+  /// Récupère les jours fériés et week-ends pour une période donnée avec cache
+  Future<List<String>> getHolidays(int year, {String? agencyId, bool forceRefresh = false}) async {
+    final cacheKey = 'holidays_${year}_$agencyId';
+    final cache = BoondCacheService();
+    
+    if (!forceRefresh) {
+      final cachedData = await cache.get(cacheKey);
+      if (cachedData != null) {
+        return List<String>.from(cachedData);
+      }
+    }
+
     final startDate = '$year-01-01';
     final endDate = '$year-12-31';
     
@@ -167,6 +278,8 @@ class BoondService {
           }
         }
       }
+      
+      await cache.put(cacheKey, holidays);
       return holidays;
     } on DioException catch (e) {
       final dynamic errorBody = e.response?.data;
@@ -208,10 +321,20 @@ class BoondService {
     }
   }
 
-  /// Récupère une société spécifique
+  /// Récupère une société spécifique (profil de base)
   Future<Map<String, dynamic>> getCompany(int id) async {
     try {
       final response = await _dio.get('companies/$id');
+      return response.data['data'];
+    } catch (e) {
+      throw e.toString();
+    }
+  }
+
+  /// Récupère les informations d'une société spécifique (adresse, numéro de fournisseur)
+  Future<Map<String, dynamic>> getCompanyInformation(int id) async {
+    try {
+      final response = await _dio.get('companies/$id/information');
       return response.data['data'];
     } catch (e) {
       throw e.toString();
@@ -226,6 +349,21 @@ class BoondService {
     } catch (e) {
       throw e.toString();
     }
+  }
+
+  /// Récupère une ressource spécifique
+  Future<Map<String, dynamic>> getResource(int id) async {
+    try {
+      final response = await _dio.get('resources/$id');
+      return response.data['data'];
+    } catch (e) {
+      throw e.toString();
+    }
+  }
+
+  /// Exécute une requête GET brute (utile pour inspecter les en-têtes et les métadonnées de réponse)
+  Future<Response<T>> getRaw<T>(String path, {Map<String, dynamic>? queryParameters}) {
+    return _dio.get<T>(path, queryParameters: queryParameters);
   }
 
   /// Teste la connexion à BoondManager

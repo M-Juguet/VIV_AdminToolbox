@@ -10,6 +10,7 @@ import '../providers/settings_provider.dart';
 import 'dashboard_screen.dart';
 import 'settings_screen.dart';
 import 'toolbox_screen.dart';
+import 'bdc_screen.dart';
 import '../providers/dashboard_provider.dart';
 import '../providers/update_provider.dart';
 import '../widgets/update_modal.dart';
@@ -96,7 +97,7 @@ class _MainShellState extends ConsumerState<MainShell> {
                                   height: 24,
                                 )
                               : Image.asset(
-                                  'assets/images/viv-horizontal-white.png',
+                                  'assets/images/viv-horizontal-white-sm.png',
                                   key: const ValueKey('full'),
                                   height: 24,
                                 ),
@@ -448,7 +449,7 @@ class _MainShellState extends ConsumerState<MainShell> {
                     children: const [
                       DashboardScreen(),
                       Center(child: Text("Gestion des Devis (À venir)")),
-                      Center(child: Text("Bons de commande (À venir)")),
+                      BdcScreen(),
                       Center(child: Text("Rapports de production (À venir)")),
                       ToolboxScreen(),
                       SettingsScreen(),
