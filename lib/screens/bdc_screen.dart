@@ -241,6 +241,18 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
       final yearInt = int.tryParse(_selectedYear) ?? DateTime.now().year;
       _holidays = await service.getHolidays(yearInt);
 
+      // Charger le dictionnaire pour obtenir l'ID de l'état "Sortie"
+      final dict = await service.getDictionary();
+      final resourceStates = dict['data']?['setting']?['state']?['resource'] as List? ?? [];
+      int? exitStateId;
+      for (var state in resourceStates) {
+        final label = state['label']?.toString().toLowerCase() ?? '';
+        if (label.contains('sortie')) {
+          exitStateId = int.tryParse(state['id']?.toString() ?? '');
+          break;
+        }
+      }
+
       // 1. Récupérer les projets actifs
       final response = await service.getProjectsWithInclusions(
         filters: {'states[]': 1}, // Projets actifs
@@ -284,6 +296,10 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
           final delAttr = delivery['attributes'] ?? {};
           final delTitle = delAttr['title']?.toString() ?? 'Prestation sans titre';
           
+          if (delTitle.toLowerCase().contains('shift')) {
+            continue;
+          }
+          
           final startDateStr = delAttr['startDate']?.toString();
           final endDateStr = delAttr['endDate']?.toString();
           
@@ -305,6 +321,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
           bool isExternalResource = false;
           String resourceName = "Inconnu";
           String? consultantTitle;
+          bool isResourceExit = false;
           
           if (dependsOn != null) {
             final resId = int.tryParse(dependsOn['id']?.toString() ?? '');
@@ -312,14 +329,23 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
               try {
                 final res = await service.getResource(resId);
                 final rAttr = res['attributes'] ?? {};
-                resourceName = "${rAttr['firstName'] ?? ''} ${rAttr['lastName'] ?? ''}".trim();
-                consultantTitle = rAttr['title']?.toString() ?? rAttr['function']?.toString();
-                // typeOf = 1 pour ressource externe (sous-traitant)
-                if (rAttr['typeOf'] == 1) {
-                  isExternalResource = true;
+                final resourceState = int.tryParse(rAttr['state']?.toString() ?? '');
+                if (resourceState != null && exitStateId != null && resourceState == exitStateId) {
+                  isResourceExit = true;
+                } else {
+                  resourceName = "${rAttr['firstName'] ?? ''} ${rAttr['lastName'] ?? ''}".trim();
+                  consultantTitle = rAttr['title']?.toString() ?? rAttr['function']?.toString();
+                  // typeOf = 1 pour ressource externe (sous-traitant)
+                  if (rAttr['typeOf'] == 1) {
+                    isExternalResource = true;
+                  }
                 }
               } catch (_) {}
             }
+          }
+
+          if (isResourceExit) {
+            continue;
           }
 
           // Si ce n'est pas un consultant externe ET qu'il n'y a pas d'achat lié, on l'ignore (salarié normal)
@@ -595,6 +621,24 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
 
       final delAttr = delivery['attributes'] ?? {};
       final delTitle = delAttr['title']?.toString() ?? 'Prestation sans titre';
+
+      // 1. Règle d'exclusion "shift"
+      if (delTitle.toLowerCase().contains('shift')) {
+        setState(() {
+          _step1Candidates.removeWhere((x) => x.id == item.id);
+          _loadingItems.remove(item.id);
+        });
+        if (mounted) {
+          ShadToaster.of(context).show(
+            ShadToast(
+              title: const Text("Prestation retirée"),
+              description: Text("La prestation de ${item.consultantName} a été retirée car son titre contient 'shift'."),
+            ),
+          );
+        }
+        return;
+      }
+
       final delRef = delAttr['reference']?.toString() ?? "MIS$deliveryId";
       final delTitleWithRef = "$delRef - $delTitle";
       final purchaseRel = delivery['relationships']?['purchase']?['data'];
@@ -604,17 +648,52 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
       final resourceId = dependsOn?['id']?.toString() ?? '';
       String resourceName = "Ressource inconnue";
       String? consultantTitle;
+      bool isResourceExit = false;
+
+      // Charger le dictionnaire pour obtenir l'ID de l'état "Sortie"
+      final dict = await service.getDictionary();
+      final resourceStates = dict['data']?['setting']?['state']?['resource'] as List? ?? [];
+      int? exitStateId;
+      for (var state in resourceStates) {
+        final label = state['label']?.toString().toLowerCase() ?? '';
+        if (label.contains('sortie')) {
+          exitStateId = int.tryParse(state['id']?.toString() ?? '');
+          break;
+        }
+      }
 
       if (resourceId.isNotEmpty) {
         final resourceInt = int.tryParse(resourceId);
         if (resourceInt != null) {
           final resData = await service.getResource(resourceInt, forceRefresh: true);
           final resAttr = resData['attributes'] ?? {};
-          final firstName = resAttr['firstName']?.toString() ?? '';
-          final lastName = resAttr['lastName']?.toString() ?? '';
-          resourceName = "$firstName $lastName".trim();
-          consultantTitle = resAttr['title']?.toString();
+          final resourceState = int.tryParse(resAttr['state']?.toString() ?? '');
+          
+          if (resourceState != null && exitStateId != null && resourceState == exitStateId) {
+            isResourceExit = true;
+          } else {
+            final firstName = resAttr['firstName']?.toString() ?? '';
+            final lastName = resAttr['lastName']?.toString() ?? '';
+            resourceName = "$firstName $lastName".trim();
+            consultantTitle = resAttr['title']?.toString();
+          }
         }
+      }
+
+      if (isResourceExit) {
+        setState(() {
+          _step1Candidates.removeWhere((x) => x.id == item.id);
+          _loadingItems.remove(item.id);
+        });
+        if (mounted) {
+          ShadToaster.of(context).show(
+            ShadToast(
+              title: const Text("Prestation retirée"),
+              description: Text("La prestation de ${item.consultantName} a été retirée car la ressource est à l'état 'Sortie'."),
+            ),
+          );
+        }
+        return;
       }
 
       // Résoudre les infos fournisseur (Société + Contact)
