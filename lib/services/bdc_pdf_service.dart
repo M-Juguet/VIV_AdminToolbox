@@ -519,25 +519,27 @@ class BdcPdfService {
       alignment: alignCenter
           ? pw.Alignment.center
           : (alignRight ? pw.Alignment.centerRight : pw.Alignment.centerLeft),
-      child: pw.Column(
-        crossAxisAlignment: alignCenter
-            ? pw.CrossAxisAlignment.center
-            : (alignRight ? pw.CrossAxisAlignment.end : pw.CrossAxisAlignment.start),
-        children: [
-          pw.Text(
-            text,
-            textAlign: alignCenter ? pw.TextAlign.center : pw.TextAlign.left,
-            style: pw.TextStyle(fontSize: 8.5, fontWeight: pw.FontWeight.bold),
-          ),
-          if (subtitle != null) ...[
-            pw.SizedBox(height: 2),
-            pw.Text(
-              subtitle,
-              style: pw.TextStyle(fontSize: 7.5, color: PdfColors.grey600),
+      child: subtitle != null
+          ? pw.RichText(
+              textAlign: alignCenter ? pw.TextAlign.center : pw.TextAlign.left,
+              text: pw.TextSpan(
+                children: [
+                  pw.TextSpan(
+                    text: text,
+                    style: pw.TextStyle(fontSize: 8.5, fontWeight: pw.FontWeight.bold, color: PdfColors.black),
+                  ),
+                  pw.TextSpan(
+                    text: '   $subtitle',
+                    style: pw.TextStyle(fontSize: 7.5, color: PdfColors.grey600, fontWeight: pw.FontWeight.normal),
+                  ),
+                ],
+              ),
+            )
+          : pw.Text(
+              text,
+              textAlign: alignCenter ? pw.TextAlign.center : pw.TextAlign.left,
+              style: pw.TextStyle(fontSize: 8.5, fontWeight: pw.FontWeight.bold),
             ),
-          ],
-        ],
-      ),
     );
   }
 
