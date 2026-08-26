@@ -422,6 +422,34 @@ class _MainShellState extends ConsumerState<MainShell> {
                                 onPressed: () {},
                               ),
                               const SizedBox(width: VivSpacing.space2),
+                              // Bouton Réduire
+                              IconButton(
+                                icon: const Icon(
+                                  LucideIcons.minus,
+                                  size: 18,
+                                  color: VivColors.gray500,
+                                ),
+                                onPressed: () async {
+                                  await windowManager.minimize();
+                                },
+                              ),
+                              const SizedBox(width: VivSpacing.space2),
+                              // Bouton Agrandir / Restaurer
+                              IconButton(
+                                icon: const Icon(
+                                  LucideIcons.square,
+                                  size: 13, // Un peu plus petit pour le style bouton Windows
+                                  color: VivColors.gray500,
+                                ),
+                                onPressed: () async {
+                                  if (await windowManager.isMaximized()) {
+                                    await windowManager.unmaximize();
+                                  } else {
+                                    await windowManager.maximize();
+                                  }
+                                },
+                              ),
+                              const SizedBox(width: VivSpacing.space2),
                               IconButton(
                                 icon: const Icon(
                                   LucideIcons.x,

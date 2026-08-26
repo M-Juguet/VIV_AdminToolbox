@@ -11,9 +11,15 @@ import '../providers/settings_provider.dart';
 import '../providers/dashboard_provider.dart';
 import '../services/bdc_pdf_service.dart';
 import 'tools/bdc_rules_diagnostic_screen.dart';
-
 import '../services/bdc_sent_logs_service.dart';
 import '../services/boond_cache_service.dart';
+import '../services/boond_service.dart';
+import '../services/calendar_service.dart';
+import '../services/email_service.dart';
+import '../services/bdc_rules_service.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as p;
+import 'package:url_launcher/url_launcher.dart';
 
 class BdcPrestaStep1 {
   final String id;
@@ -28,6 +34,24 @@ class BdcPrestaStep1 {
   bool isSelected;
   bool isAlreadySent;
   String? sentDate;
+  final double tjmAchat;
+  final double quantitySold;
+  final String? consultantTitle;
+  final String clientCsoc;
+  final String projectId;
+  final String providerEmail;
+  final String? providerContactId;
+  final String? purchaseId;
+  
+  // Nouveaux champs d'adresses et dates réelles
+  final String providerAddress;
+  final String providerPostcode;
+  final String providerTown;
+  final String providerCountry;
+  final String startDate;
+  final String endDate;
+  final String prestationRef;
+  final String projectRef;
 
   BdcPrestaStep1({
     required this.id,
@@ -42,6 +66,22 @@ class BdcPrestaStep1 {
     this.isSelected = true,
     this.isAlreadySent = false,
     this.sentDate,
+    required this.tjmAchat,
+    required this.quantitySold,
+    this.consultantTitle,
+    required this.clientCsoc,
+    required this.projectId,
+    required this.providerEmail,
+    this.providerContactId,
+    this.purchaseId,
+    required this.providerAddress,
+    required this.providerPostcode,
+    required this.providerTown,
+    required this.providerCountry,
+    required this.startDate,
+    required this.endDate,
+    required this.prestationRef,
+    required this.projectRef,
   });
 }
 
@@ -56,6 +96,18 @@ class BdcPrestaStep2 {
   final double tjm;
   final double totalHt;
   final String? appliedRule;
+  
+  // Nouveaux champs pour les vraies données Boond
+  final String providerId;
+  final String providerName;
+  final String providerAddress;
+  final String providerPostcode;
+  final String providerTown;
+  final String providerCountry;
+  final String? purchaseId;
+  final String startDate;
+  final String endDate;
+  final String prestationRef;
 
   BdcPrestaStep2({
     required this.id,
@@ -68,6 +120,16 @@ class BdcPrestaStep2 {
     required this.tjm,
     required this.totalHt,
     this.appliedRule,
+    required this.providerId,
+    required this.providerName,
+    required this.providerAddress,
+    required this.providerPostcode,
+    required this.providerTown,
+    required this.providerCountry,
+    this.purchaseId,
+    required this.startDate,
+    required this.endDate,
+    required this.prestationRef,
   });
 }
 
@@ -123,6 +185,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
   late List<BdcPrestaStep1> _step1Candidates;
   List<BdcPrestaStep2> _step2Calculated = [];
   List<BdcMailStatus> _smtpStatusList = [];
+  List<String> _holidays = [];
 
   @override
   void initState() {
@@ -155,50 +218,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
   }
 
   void _resetStep1Data() {
-    _step1Candidates = [
-      BdcPrestaStep1(
-        id: "26",
-        consultantName: "Natalie Portman",
-        providerName: "John DOE & Cie",
-        providerId: "CSOC15",
-        projectName: "Mission Toto",
-        clientName: "LOUIS VUITTON",
-        title: "Mission de Nathalie (Toto)",
-        boondLink: "https://ui.boondmanager.com/companies/15/information",
-      ),
-      BdcPrestaStep1(
-        id: "27",
-        consultantName: "John DOE",
-        providerName: "John DOE & Cie",
-        providerId: "CSOC15",
-        projectName: "Projet de Tata",
-        clientName: "Entreprise de peinture",
-        title: "Ma super presta",
-        boondLink: "https://ui.boondmanager.com/companies/15/information",
-      ),
-      BdcPrestaStep1(
-        id: "24",
-        consultantName: "Audrey TAUTOU",
-        providerName: "Audrey Production",
-        providerId: "CSOC22",
-        projectName: "Projet Test BDC 02",
-        clientName: "STELLANTIS",
-        title: "DOP on model",
-        boondLink: "https://ui.boondmanager.com/companies/22/information",
-      ),
-      BdcPrestaStep1(
-        id: "23",
-        consultantName: "Jean DUJARDIN",
-        providerName: "Dujardin SAS",
-        providerId: "CSOC9",
-        projectName: "Projet Test BDC 02",
-        clientName: "Entreprise de peinture",
-        title: "Presta BDC A",
-        alertMessage: "E-mail de contact commercial absent sur la fiche fournisseur.",
-        boondLink: "https://ui.boondmanager.com/companies/9/information",
-        isSelected: false, // Décoché par défaut à cause de l'alerte
-      ),
-    ];
+    _step1Candidates = [];
   }
 
   // --- ACTIONS DU FLUX ---
@@ -208,81 +228,457 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
       _isLoadingDetection = true;
     });
 
-    // Charger les logs d'envoi pour cette période
     final period = '$_selectedMonth/$_selectedYear';
     final logsService = BdcSentLogsService();
-    
-    // Réinitialiser les candidats de base
-    _resetStep1Data();
+    final service = ref.read(boondServiceProvider);
+    final settings = ref.read(settingsProvider);
 
-    // Vérifier les doublons dans la base locale
-    for (var candidate in _step1Candidates) {
-      final log = await logsService.getSentLog(candidate.providerId, period);
-      if (log != null) {
-        candidate.isAlreadySent = true;
-        
-        final sentAtStr = log['sentAt'] as String?;
-        if (sentAtStr != null) {
-          final sentAt = DateTime.parse(sentAtStr);
-          candidate.sentDate = "${sentAt.day.toString().padLeft(2, '0')}/${sentAt.month.toString().padLeft(2, '0')}/${sentAt.year}";
+    final List<BdcPrestaStep1> detectedCandidates = [];
+
+    try {
+      // 0. Charger les jours fériés pour l'année sélectionnée
+      final yearInt = int.tryParse(_selectedYear) ?? DateTime.now().year;
+      _holidays = await service.getHolidays(yearInt);
+
+      // 1. Récupérer les projets actifs
+      final response = await service.getProjectsWithInclusions(
+        filters: {'states[]': 1}, // Projets actifs
+        inclusions: ['company'],
+      );
+      final projects = response['data'] as List? ?? [];
+      final included = response['included'] as List? ?? [];
+
+      // Mapper les ID d'entreprises (clients) vers leurs noms pour la résolution rapide
+      final Map<String, String> companyNames = {};
+      for (var item in included) {
+        if (item['type'] == 'company' || item['type'] == 'companies') {
+          final id = item['id']?.toString() ?? '';
+          final name = item['attributes']?['name']?.toString() ?? 'Société sans nom';
+          companyNames[id] = name;
         }
-        
-        // Sécurité : décocher automatiquement par défaut les bons déjà envoyés
-        candidate.isSelected = false;
       }
-    }
 
-    Future.delayed(const Duration(milliseconds: 1500), () {
+      // 2. Parcourir les projets et charger leurs prestations de sous-traitance
+      for (var p in projects) {
+        final projectIdStr = p['id']?.toString() ?? '';
+        final projectId = int.tryParse(projectIdStr);
+        if (projectId == null) continue;
+
+        final projectName = p['attributes']?['reference']?.toString() ?? 'Projet sans nom';
+        final projectRef = "PRJ$projectIdStr";
+        final clientRel = p['relationships']?['company']?['data'];
+        final clientId = clientRel?['id']?.toString();
+        final clientName = companyNames[clientId] ?? 'Client inconnu';
+
+        // Récupérer les prestations du projet
+        final List<dynamic> deliveries = await service.getDeliveries(projectId);
+        
+        final monthInt = int.tryParse(_selectedMonth) ?? DateTime.now().month;
+        final yearInt = int.tryParse(_selectedYear) ?? DateTime.now().year;
+        final startOfPeriod = DateTime(yearInt, monthInt, 1);
+        final endOfPeriod = monthInt == 12 ? DateTime(yearInt + 1, 1, 0) : DateTime(yearInt, monthInt + 1, 0);
+
+        for (var delivery in deliveries) {
+          final delId = delivery['id']?.toString() ?? '';
+          final delAttr = delivery['attributes'] ?? {};
+          final delTitle = delAttr['title']?.toString() ?? 'Prestation sans titre';
+          
+          final startDateStr = delAttr['startDate']?.toString();
+          final endDateStr = delAttr['endDate']?.toString();
+          
+          if (startDateStr != null && endDateStr != null) {
+            final startDate = DateTime.tryParse(startDateStr);
+            final endDate = DateTime.tryParse(endDateStr);
+            if (startDate != null && endDate != null) {
+              if (endDate.isBefore(startOfPeriod) || startDate.isAfter(endOfPeriod)) {
+                // La prestation ne se superpose pas avec le mois sélectionné, on l'ignore
+                continue;
+              }
+            }
+          }
+          
+          final dependsOn = delivery['relationships']?['dependsOn']?['data'];
+          final purchaseRel = delivery['relationships']?['purchase']?['data'];
+
+          // Résoudre la ressource et vérifier si elle est externe (typeOf == 1)
+          bool isExternalResource = false;
+          String resourceName = "Inconnu";
+          String? consultantTitle;
+          
+          if (dependsOn != null) {
+            final resId = int.tryParse(dependsOn['id']?.toString() ?? '');
+            if (resId != null) {
+              try {
+                final res = await service.getResource(resId);
+                final rAttr = res['attributes'] ?? {};
+                resourceName = "${rAttr['firstName'] ?? ''} ${rAttr['lastName'] ?? ''}".trim();
+                consultantTitle = rAttr['title']?.toString() ?? rAttr['function']?.toString();
+                // typeOf = 1 pour ressource externe (sous-traitant)
+                if (rAttr['typeOf'] == 1) {
+                  isExternalResource = true;
+                }
+              } catch (_) {}
+            }
+          }
+
+          // Si ce n'est pas un consultant externe ET qu'il n'y a pas d'achat lié, on l'ignore (salarié normal)
+          if (!isExternalResource && purchaseRel == null) {
+            continue;
+          }
+
+          // Résoudre l'achat et les infos fournisseur (Company + Contact)
+          String providerName = "Aucun";
+          String providerId = "Aucun";
+          String? alertMessage;
+          String contactEmail = "";
+          String? providerContactId;
+          String? purchaseIdStr;
+
+          if (purchaseRel == null) {
+            alertMessage = "Aucun achat associé à la prestation.";
+          } else {
+            final purchaseId = int.tryParse(purchaseRel['id']?.toString() ?? '');
+            purchaseIdStr = purchaseId?.toString();
+            if (purchaseId != null) {
+              try {
+                // Récupère l'achat avec inclusions de la société fournisseur et du contact fournisseur
+                final pResponse = await service.getPurchaseWithInclusions(purchaseId);
+                final pIncluded = pResponse['included'] as List? ?? [];
+                
+                // 1. Trouver l'entité Société (Company) dans included
+                final compObj = pIncluded.firstWhere(
+                  (item) => item['type'] == 'companies' || item['type'] == 'company',
+                  orElse: () => null,
+                );
+                if (compObj != null) {
+                  providerName = compObj['attributes']?['name']?.toString() ?? 'Société sans nom';
+                  providerId = compObj['id']?.toString() ?? '';
+                }
+
+                // 2. Trouver l'entité Contact (providerContact) dans included
+                final contactObj = pIncluded.firstWhere(
+                  (item) => item['type'] == 'contacts' || item['type'] == 'contact',
+                  orElse: () => null,
+                );
+                if (contactObj != null) {
+                  providerContactId = contactObj['id']?.toString();
+                  final cAttr = contactObj['attributes'] ?? {};
+                  contactEmail = (cAttr['email'] ??
+                          cAttr['email1'] ??
+                          cAttr['emailOne'] ??
+                          cAttr['emailPro'] ??
+                          '')
+                      .toString();
+                } else if (providerId != "Aucun" && providerId.isNotEmpty) {
+                  // Fallback : charger les contacts de la société fournisseur si non lié sur l'achat
+                  final companyIdInt = int.tryParse(providerId);
+                  if (companyIdInt != null) {
+                    try {
+                      final contactsList = await service.getCompanyContacts(companyIdInt);
+                      if (contactsList.isEmpty) {
+                        alertMessage = "Aucun contact administratif renseigné pour le fournisseur";
+                      } else if (contactsList.length == 1) {
+                        // Dans le cas où un seul contact est disponible : le récupérer et vérifier l'email
+                        final singleContact = contactsList.first;
+                        providerContactId = singleContact['id']?.toString();
+                        final cAttr = singleContact['attributes'] ?? {};
+                        contactEmail = (cAttr['email'] ??
+                                cAttr['email1'] ??
+                                cAttr['emailOne'] ??
+                                cAttr['emailPro'] ??
+                                '')
+                            .toString();
+                      } else {
+                        // Dans le cas où plusieurs contacts sont disponibles : filtrage par état "Fournisseur"
+                        final dict = await service.getDictionary();
+                        final contactStates = dict['data']?['setting']?['state']?['contact'] as List? ?? [];
+                        int? supplierStateId;
+                        for (var state in contactStates) {
+                          final label = state['label']?.toString().toLowerCase() ?? '';
+                          if (label.contains('fournisseur')) {
+                            supplierStateId = int.tryParse(state['id']?.toString() ?? '');
+                            break;
+                          }
+                        }
+
+                        final supplierContacts = contactsList.where((c) {
+                          final stateVal = int.tryParse(c['attributes']?['state']?.toString() ?? '');
+                          return stateVal != null && stateVal == supplierStateId;
+                        }).toList();
+
+                        if (supplierContacts.isEmpty) {
+                          alertMessage = "Aucun contact avec l'état 'Fournisseur' parmi les contacts trouvés";
+                        } else if (supplierContacts.length > 1) {
+                          alertMessage = "Plusieurs contacts avec l'état 'Fournisseur' détectés.";
+                        } else {
+                          // Un seul contact a l'état "Fournisseur"
+                          final selectedContact = supplierContacts.first;
+                          providerContactId = selectedContact['id']?.toString();
+                          final cAttr = selectedContact['attributes'] ?? {};
+                          contactEmail = (cAttr['email'] ??
+                                  cAttr['email1'] ??
+                                  cAttr['emailOne'] ??
+                                  cAttr['emailPro'] ??
+                                  '')
+                              .toString();
+                        }
+                      }
+                    } catch (_) {}
+                  }
+                }
+                
+                // Définir le message d'alerte global si non défini ci-dessus
+                if (alertMessage == null) {
+                  if (providerId == "Aucun" || providerId.isEmpty) {
+                    alertMessage = "Aucun fournisseur lié à l'achat de prestation.";
+                  } else if (providerContactId == null || providerContactId.isEmpty) {
+                    alertMessage = "Aucun contact administratif renseigné pour le fournisseur";
+                  } else if (contactEmail.isEmpty || !contactEmail.contains('@')) {
+                    alertMessage = "E-mail de contact non renseigné";
+                  }
+                }
+              } catch (e) {
+                alertMessage = "Impossible de récupérer les informations fournisseur : $e";
+              }
+            } else {
+              alertMessage = "Aucun achat associé.";
+            }
+          }
+
+          // Résoudre l'adresse complète du fournisseur si providerId est connu
+          String providerAddress = "Non renseignée";
+          String providerPostcode = "";
+          String providerTown = "";
+          String providerCountry = "";
+          if (providerId != "Aucun" && providerId.isNotEmpty) {
+            final compIdInt = int.tryParse(providerId);
+            if (compIdInt != null) {
+              try {
+                final companyInfo = await service.getCompanyInformation(compIdInt);
+                final cAttr = companyInfo['attributes'] ?? {};
+                providerAddress = cAttr['address']?.toString() ?? 'Non renseignée';
+                providerPostcode = cAttr['postcode']?.toString() ?? '';
+                providerTown = cAttr['town']?.toString() ?? '';
+                providerCountry = cAttr['country']?.toString() ?? '';
+              } catch (_) {}
+            }
+          }
+
+          // Résoudre la référence (ex: MIS31) avec fallback sur "MIS$delId"
+          final String delRef = delAttr['reference']?.toString() ?? "MIS$delId";
+          final String delTitleWithRef = "$delRef - $delTitle";
+
+          // Borner les dates au mois sélectionné si elles dépassent
+          DateTime finalStartDate = startOfPeriod;
+          DateTime finalEndDate = endOfPeriod;
+
+          if (startDateStr != null && endDateStr != null) {
+            final startDate = DateTime.tryParse(startDateStr);
+            final endDate = DateTime.tryParse(endDateStr);
+            if (startDate != null && endDate != null) {
+              if (startDate.isAfter(startOfPeriod)) {
+                finalStartDate = startDate;
+              }
+              if (endDate.isBefore(endOfPeriod)) {
+                finalEndDate = endDate;
+              }
+            }
+          }
+
+          final String displayStartDate = "${finalStartDate.day.toString().padLeft(2, '0')}/${finalStartDate.month.toString().padLeft(2, '0')}/${finalStartDate.year}";
+          final String displayEndDate = "${finalEndDate.day.toString().padLeft(2, '0')}/${finalEndDate.month.toString().padLeft(2, '0')}/${finalEndDate.year}";
+
+          // Extraire la quantité vendue et calculer le TJM d'achat
+          final double quantitySold = double.tryParse(delAttr['numberOfDaysInvoicedOrQuantity']?.toString() ?? '0') ?? 0;
+          final double costsSimulated = double.tryParse(delAttr['costsSimulatedExcludingTax']?.toString() ?? '0') ?? 0;
+          double averageDailyCost = 0;
+          if (quantitySold > 0) {
+            averageDailyCost = costsSimulated / quantitySold;
+          }
+
+           final candidate = BdcPrestaStep1(
+            id: delId,
+            consultantName: resourceName,
+            providerName: providerName,
+            providerId: providerId,
+            projectName: projectName,
+            clientName: clientName,
+            title: delTitleWithRef,
+            alertMessage: alertMessage,
+            boondLink: "${settings.boondUrl.endsWith('/') ? settings.boondUrl : '${settings.boondUrl}/'}projects/$projectId/deliveries",
+            isSelected: alertMessage == null, // Coché par défaut s'il n'y a pas d'alerte critique
+            tjmAchat: averageDailyCost,
+            quantitySold: quantitySold,
+            consultantTitle: consultantTitle,
+            clientCsoc: clientId ?? "",
+            projectId: projectIdStr,
+            providerEmail: contactEmail,
+            providerContactId: providerContactId,
+            purchaseId: purchaseIdStr,
+            providerAddress: providerAddress,
+            providerPostcode: providerPostcode,
+            providerTown: providerTown,
+            providerCountry: providerCountry,
+            startDate: displayStartDate,
+            endDate: displayEndDate,
+            prestationRef: delRef,
+            projectRef: projectRef,
+          );
+
+          // Vérifier si un doublon d'envoi existe en BDD locale
+          final log = await logsService.getSentLog(candidate.providerId, period);
+          if (log != null) {
+            candidate.isAlreadySent = true;
+            final sentAtStr = log['sentAt'] as String?;
+            if (sentAtStr != null) {
+              final sentAt = DateTime.parse(sentAtStr);
+              candidate.sentDate = "${sentAt.day.toString().padLeft(2, '0')}/${sentAt.month.toString().padLeft(2, '0')}/${sentAt.year}";
+            }
+            candidate.isSelected = false; // Décoché par défaut si déjà envoyé
+          }
+
+          detectedCandidates.add(candidate);
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _step1Candidates = detectedCandidates;
+          _isLoadingDetection = false;
+          _periodDetectionStatus[_currentPeriodKey] = true;
+          _maxUnlockedStep = 0;
+        });
+      }
+    } catch (e) {
       if (mounted) {
         setState(() {
           _isLoadingDetection = false;
-          _periodDetectionStatus[_currentPeriodKey] = true;
-          _maxUnlockedStep = 0; // Onglet 0 actif avec données déverrouillées
         });
+        ShadToaster.of(context).show(
+          ShadToast.destructive(
+            title: const Text("Erreur de détection"),
+            description: Text("Impossible de charger les données : $e"),
+          ),
+        );
       }
-    });
+    }
   }
 
-  void _calculateSelected(List<BdcPrestaStep1> filteredList) {
+  void _calculateSelected(List<BdcPrestaStep1> filteredList) async {
+    setState(() {
+      _isLoadingDetection = true;
+    });
+
     final selectedCandidates = filteredList.where((c) => c.isSelected).toList();
     
-    // Simuler l'application des règles client
+    // Charger les règles de facturation utilisateur depuis bdc_rules.json
+    final rules = await BdcRulesService().loadRules();
+    
     final List<BdcPrestaStep2> results = [];
-    for (var c in selectedCandidates) {
-      String mode = "Standard";
-      int uo = 21; // 21 jours ouvrés théoriques en Août 2026
-      double tjm = 250.0;
-      String? rule;
-      String cName = c.consultantName;
+    final monthInt = int.tryParse(_selectedMonth) ?? DateTime.now().month;
+    final yearInt = int.tryParse(_selectedYear) ?? DateTime.now().year;
 
-      if (c.clientName == "LOUIS VUITTON") {
-        mode = "Fixe Manuel";
-        uo = 10; // Règle Louis Vuitton : Montage vidéo 10j
-        tjm = 200.0;
-        rule = "LOUIS VUITTON (Limitation fixe à 10 UO)";
-      } else if (c.clientName == "STELLANTIS") {
-        mode = "Jours Vendus";
-        uo = 5; // Simule le volume vendu Boond
-        tjm = 350.0;
-        rule = "STELLANTIS (Jours vendus + Titre professionnel)";
+    // Calculer les jours ouvrés théoriques standard du mois
+    final startOfMonth = DateTime(yearInt, monthInt, 1);
+    final endOfMonth = monthInt == 12 ? DateTime(yearInt + 1, 1, 0) : DateTime(yearInt, monthInt + 1, 0);
+    final int standardWorkingDays = CalendarService.calculateWorkingDays(
+      start: startOfMonth,
+      end: endOfMonth,
+      holidays: _holidays,
+    );
+
+    for (var c in selectedCandidates) {
+      BdcRule? matchedRule;
+      
+      // Rechercher la première règle correspondante
+      for (var rule in rules) {
+        // 1. Filtre Client (si configuré)
+        if (rule.clientCsoc.isNotEmpty && rule.clientCsoc != c.clientCsoc) {
+          continue;
+        }
+        
+        // 2. Filtre Projet (si configuré)
+        if (rule.projectId.isNotEmpty && rule.projectId != c.projectId) {
+          continue;
+        }
+        
+        // 3. Filtre Mots-clés (si configuré)
+        if (rule.keywords.isNotEmpty) {
+          bool keywordMatched = false;
+          for (var kw in rule.keywords) {
+            final textToSearch = kw.caseSensitive ? c.title : c.title.toLowerCase();
+            final query = kw.caseSensitive ? kw.text : kw.text.toLowerCase();
+            if (textToSearch.contains(query)) {
+              keywordMatched = true;
+              break;
+            }
+          }
+          if (!keywordMatched) continue;
+        }
+
+        // Si on arrive ici, la règle correspond !
+        matchedRule = rule;
+        break;
+      }
+
+      // 2. Appliquer les calculs basés sur la règle matchée ou le comportement Standard
+      String modeName = "Standard";
+      int uoCount = standardWorkingDays;
+      String? ruleName;
+      String prestationTitle = c.title;
+
+      if (matchedRule != null) {
+        ruleName = matchedRule.clientName.isNotEmpty 
+            ? "${matchedRule.clientName} (Règle appliquée)"
+            : "Règle appliquée";
+        
+        // Mode de calcul
+        if (matchedRule.calculationMode == 'manual') {
+          modeName = "Fixe Manuel";
+          uoCount = matchedRule.manualDays.round();
+        } else if (matchedRule.calculationMode == 'sold') {
+          modeName = "Jours Vendus";
+          uoCount = c.quantitySold.round();
+        } else {
+          modeName = "Standard";
+          uoCount = standardWorkingDays;
+        }
+
+        // Mode d'affichage du titre
+        if (matchedRule.titleMode == 'resource_title') {
+          final prefixMatch = RegExp(r'^(MIS\d+\s*-\s*)').firstMatch(c.title);
+          final prefix = prefixMatch != null ? prefixMatch.group(0)! : '';
+          prestationTitle = prefix + (c.consultantTitle ?? c.title.replaceAll(prefix, ''));
+        }
       }
 
       results.add(BdcPrestaStep2(
         id: c.id,
-        consultantName: cName,
+        consultantName: c.consultantName,
         clientName: c.clientName,
         projectName: c.projectName,
-        prestationTitle: c.title,
-        calculationMode: mode,
-        uoCount: uo,
-        tjm: tjm,
-        totalHt: uo * tjm,
-        appliedRule: rule,
+        prestationTitle: prestationTitle,
+        calculationMode: modeName,
+        uoCount: uoCount,
+        tjm: c.tjmAchat,
+        totalHt: uoCount * c.tjmAchat,
+        appliedRule: ruleName,
+        providerId: c.providerId,
+        providerName: c.providerName,
+        providerAddress: c.providerAddress,
+        providerPostcode: c.providerPostcode,
+        providerTown: c.providerTown,
+        providerCountry: c.providerCountry,
+        purchaseId: c.purchaseId,
+        startDate: c.startDate,
+        endDate: c.endDate,
+        prestationRef: c.prestationRef,
       ));
     }
 
     setState(() {
       _step2Calculated = results;
+      _isLoadingDetection = false;
       _maxUnlockedStep = 1; // Déverrouille l'onglet 1 (Calcul & Audit)
     });
     
@@ -297,7 +693,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
         id: c.id,
         consultantName: c.consultantName,
         providerName: orig.providerName,
-        email: "contact@${orig.providerName.toLowerCase().replaceAll(' ', '')}.com",
+        email: orig.providerEmail.isNotEmpty ? orig.providerEmail : "fournisseurs@viv-prod.com",
         status: 'pending',
       ));
     }
@@ -357,55 +753,73 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
         return;
       }
 
-      // Étape 2 : Envoi SMTP
+      // Étape 2 : Envoi SMTP réel
       setState(() {
         item.status = 'sending';
       });
 
-      Future.delayed(const Duration(milliseconds: 800), () async {
+      Future.delayed(const Duration(milliseconds: 300), () async {
         if (!mounted) return;
         
-        final logsService = BdcSentLogsService();
-        final period = '$_selectedMonth/$_selectedYear';
+        try {
+          final tempDir = await getTemporaryDirectory();
+          final tempFile = File(p.join(tempDir.path, "temp_${step1Item.providerId}.pdf"));
+          await tempFile.writeAsBytes(pdfBytes!);
 
-        // Simulation d'une erreur sur Audrey Production pour illustrer le "Renvoyer uniquement les échecs"
-        if (item.providerName.contains("Audrey")) {
+          final settings = ref.read(settingsProvider);
+          final emailService = ref.read(emailServiceProvider);
+          final period = '$_selectedMonth/$_selectedYear';
+          final logsService = BdcSentLogsService();
+
+          // 1. Envoyer le mail avec pièce jointe
+          await emailService.sendEmail(
+            settings: settings,
+            to: item.email,
+            subject: "Bon de Commande Opsis - Période $period - ${step2Item.consultantName}",
+            body: "Bonjour,\n\nVeuillez trouver ci-joint le bon de commande pour la prestation de ${step2Item.consultantName} sur la période de $period.\n\nCordialement,\nL'administrateur Opsis.",
+            attachments: [tempFile],
+            bcc: [settings.smtpUser], // Copie conforme à l'expéditeur
+          );
+
+          // Supprimer le fichier temporaire
+          try {
+            await tempFile.delete();
+          } catch (_) {}
+
+          // 2. Sauvegarder dans Sembast + disque physique local
+          final int existingCount = await logsService.getSentCountForProvider(step1Item.providerId, _selectedYear);
+          final String seqStr = (existingCount + 1).toString().padLeft(2, '0');
+          final String yearSuffix = _selectedYear.substring(_selectedYear.length - 2);
+          final String bdcNumber = "VIV-PO-CSOC${step1Item.providerId}-$yearSuffix$seqStr";
+
+          await logsService.logSentBdc(
+            providerId: step1Item.providerId,
+            consultantName: step2Item.consultantName,
+            clientName: step2Item.clientName,
+            projectName: step2Item.projectName,
+            prestationTitle: step2Item.prestationTitle,
+            period: period,
+            sentToEmail: item.email,
+            bdcNumber: bdcNumber,
+            uoCount: step2Item.uoCount.toDouble(),
+            totalHt: step2Item.totalHt,
+            pdfBytes: pdfBytes,
+          );
+
+          // Mettre à jour immédiatement en mémoire pour que la phase 1 soit à jour
+          step1Item.isAlreadySent = true;
+          final now = DateTime.now();
+          step1Item.sentDate = "${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year}";
+          step1Item.isSelected = false;
+
+          setState(() {
+            item.status = 'success';
+          });
+        } catch (e) {
           setState(() {
             item.status = 'failed';
-            item.errorMessage = "Hôte SMTP inaccessible (Timeout réseau)";
+            item.errorMessage = e.toString();
           });
-        } else {
-          try {
-            // Sauvegarder dans Sembast + disque physique
-            await logsService.logSentBdc(
-              providerId: step1Item.providerId,
-              consultantName: step2Item.consultantName,
-              clientName: step2Item.clientName,
-              projectName: step2Item.projectName,
-              prestationTitle: step2Item.prestationTitle,
-              period: period,
-              sentToEmail: item.email,
-              bdcNumber: "VIV-PO-${step1Item.providerId}-${_selectedMonth.toString().padLeft(2, '0')}${_selectedYear.toString().substring(2)}",
-              uoCount: step2Item.uoCount.toDouble(),
-              totalHt: step2Item.totalHt,
-              pdfBytes: pdfBytes!,
-            );
-
-            // Mettre à jour immédiatement en mémoire pour que la phase 1 soit à jour
-            step1Item.isAlreadySent = true;
-            final now = DateTime.now();
-            step1Item.sentDate = "${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year}";
-            step1Item.isSelected = false;
-
-            setState(() {
-              item.status = 'success';
-            });
-          } catch (dbError) {
-            setState(() {
-              item.status = 'failed';
-              item.errorMessage = "Échec d'archivage local : $dbError";
-            });
-          }
         }
 
         _sendMailSequential(index + 1);
@@ -420,6 +834,8 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
 
     final logsService = BdcSentLogsService();
     final period = '$_selectedMonth/$_selectedYear';
+    final settings = ref.read(settingsProvider);
+    final emailService = ref.read(emailServiceProvider);
 
     for (var item in _smtpStatusList) {
       if (item.status == 'failed') {
@@ -427,7 +843,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
           item.status = 'generating';
         });
         
-        await Future.delayed(const Duration(milliseconds: 600));
+        await Future.delayed(const Duration(milliseconds: 300));
         
         final step2Item = _step2Calculated.firstWhere((x) => x.id == item.id);
         final step1Item = _step1Candidates.firstWhere((x) => x.id == item.id);
@@ -440,7 +856,30 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
             item.status = 'sending';
           });
           
-          await Future.delayed(const Duration(milliseconds: 800));
+          final tempDir = await getTemporaryDirectory();
+          final tempFile = File(p.join(tempDir.path, "temp_retry_${step1Item.providerId}.pdf"));
+          await tempFile.writeAsBytes(pdfBytes);
+
+          // 1. Envoyer le mail réel
+          await emailService.sendEmail(
+            settings: settings,
+            to: item.email,
+            subject: "Bon de Commande Opsis - Période $period - ${step2Item.consultantName}",
+            body: "Bonjour,\n\nVeuillez trouver ci-joint le bon de commande pour la prestation de ${step2Item.consultantName} sur la période de $period.\n\nCordialement,\nL'administrateur Opsis.",
+            attachments: [tempFile],
+            bcc: [settings.smtpUser], // Copie conforme à l'expéditeur
+          );
+
+          // Supprimer le fichier temporaire
+          try {
+            await tempFile.delete();
+          } catch (_) {}
+
+          // 2. Sauvegarder dans Sembast + disque physique local
+          final int existingCount = await logsService.getSentCountForProvider(step1Item.providerId, _selectedYear);
+          final String seqStr = (existingCount + 1).toString().padLeft(2, '0');
+          final String yearSuffix = _selectedYear.substring(_selectedYear.length - 2);
+          final String bdcNumber = "VIV-PO-CSOC${step1Item.providerId}-$yearSuffix$seqStr";
 
           await logsService.logSentBdc(
             providerId: step1Item.providerId,
@@ -450,7 +889,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
             prestationTitle: step2Item.prestationTitle,
             period: period,
             sentToEmail: item.email,
-            bdcNumber: "VIV-PO-${step1Item.providerId}-${_selectedMonth.toString().padLeft(2, '0')}${_selectedYear.toString().substring(2)}",
+            bdcNumber: bdcNumber,
             uoCount: step2Item.uoCount.toDouble(),
             totalHt: step2Item.totalHt,
             pdfBytes: pdfBytes,
@@ -469,7 +908,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
         } catch (e) {
           setState(() {
             item.status = 'failed';
-            item.errorMessage = "Échec persistant : $e";
+            item.errorMessage = e.toString();
           });
         }
       }
@@ -493,8 +932,8 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
     }
   }
 
-  void _showRulesModal() {
-    showDialog(
+  void _showRulesModal() async {
+    await showDialog(
       context: context,
       builder: (context) => Dialog(
         insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
@@ -508,6 +947,9 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
         ),
       ),
     );
+    
+    // Recalculer automatiquement l'étape 2 à partir des candidats de l'étape 1 à la fermeture du modal
+    _calculateSelected(_step1Candidates);
   }
 
   // --- RENDU GRAPHIQUE ---
@@ -950,7 +1392,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                                       children: [
                                         Text(item.clientName, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
                                         const SizedBox(height: 2),
-                                        Text(item.projectName, style: const TextStyle(fontSize: 11, color: VivColors.gray400)),
+                                        Text("${item.projectRef} - ${item.projectName}", style: const TextStyle(fontSize: 11, color: VivColors.gray400)),
                                       ],
                                     ),
                                   ),
@@ -961,7 +1403,12 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                                       children: [
                                         Text(item.providerName, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
                                         const SizedBox(height: 2),
-                                        Text(item.providerId, style: const TextStyle(fontSize: 11, color: VivColors.gray400)),
+                                        Text(
+                                          (item.providerId == "Aucun" || item.providerId.isEmpty)
+                                              ? "-"
+                                              : "CSOC${item.providerId}",
+                                          style: const TextStyle(fontSize: 11, color: VivColors.gray400),
+                                        ),
                                       ],
                                     ),
                                   ),
@@ -986,13 +1433,54 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                                                   minimumSize: Size.zero,
                                                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                                                 ),
-                                                onPressed: () {
-                                                  ShadToaster.of(context).show(
-                                                    ShadToast(
-                                                      title: const Text("Redirection BoondManager"),
-                                                      description: Text("Ouverture de l'URL : ${item.boondLink}"),
-                                                    ),
-                                                  );
+                                                onPressed: () async {
+                                                  final settings = ref.read(settingsProvider);
+                                                  var boondUiUrl = settings.boondUrl;
+                                                  if (boondUiUrl.contains('api.boondmanager.com')) {
+                                                    boondUiUrl = boondUiUrl.replaceAll('api.boondmanager.com', 'ui.boondmanager.com');
+                                                  }
+                                                  if (boondUiUrl.endsWith('/api')) {
+                                                    boondUiUrl = boondUiUrl.substring(0, boondUiUrl.length - 4);
+                                                  }
+                                                  if (boondUiUrl.endsWith('/api/')) {
+                                                    boondUiUrl = boondUiUrl.substring(0, boondUiUrl.length - 5);
+                                                  }
+                                                  if (!boondUiUrl.endsWith('/')) {
+                                                    boondUiUrl = '$boondUiUrl/';
+                                                  }
+                                                  String targetUrl = "${boondUiUrl}projects/${item.projectId}/deliveries";
+                                                  if (item.alertMessage != null) {
+                                                    if (item.alertMessage!.contains("Aucun achat associé à la prestation")) {
+                                                      targetUrl = "${boondUiUrl}deliveries/${item.id}";
+                                                    } else if (item.alertMessage!.contains("Aucun fournisseur lié à l'achat de prestation") &&
+                                                        item.purchaseId != null &&
+                                                        item.purchaseId!.isNotEmpty) {
+                                                      targetUrl = "${boondUiUrl}purchases/${item.purchaseId}/information";
+                                                    } else if ((item.alertMessage!.contains("Aucun contact administratif renseigné") ||
+                                                                item.alertMessage!.contains("Aucun contact avec l'état 'Fournisseur'") ||
+                                                                item.alertMessage!.contains("Plusieurs contacts avec l'état 'Fournisseur'")) &&
+                                                        item.providerId != "Aucun" &&
+                                                        item.providerId.isNotEmpty) {
+                                                      targetUrl = "${boondUiUrl}companies/${item.providerId}/contacts";
+                                                    } else if (item.alertMessage!.contains("E-mail de contact non renseigné") &&
+                                                        item.providerContactId != null &&
+                                                        item.providerContactId!.isNotEmpty) {
+                                                      targetUrl = "${boondUiUrl}contacts/${item.providerContactId}/information";
+                                                    }
+                                                  }
+
+                                                  final uri = Uri.tryParse(targetUrl);
+                                                  if (uri != null && await canLaunchUrl(uri)) {
+                                                    await launchUrl(uri, mode: LaunchMode.externalApplication);
+                                                  } else {
+                                                    if (!context.mounted) return;
+                                                    ShadToaster.of(context).show(
+                                                      ShadToast.destructive(
+                                                        title: const Text("Erreur de redirection"),
+                                                        description: Text("Impossible d'ouvrir l'URL : $targetUrl"),
+                                                      ),
+                                                    );
+                                                  }
                                                 },
                                                 child: const Text("Corriger", style: TextStyle(color: Colors.redAccent, fontSize: 10, fontWeight: FontWeight.bold)),
                                               ),

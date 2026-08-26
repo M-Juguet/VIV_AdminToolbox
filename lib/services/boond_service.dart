@@ -42,7 +42,7 @@ class BoondService {
     const cacheKey = 'currentUserProfile';
     final cache = BoondCacheService();
     if (!forceRefresh) {
-      final cachedData = await cache.get(cacheKey);
+      final cachedData = await cache.get(cacheKey, ttl: const Duration(days: 7));
       if (cachedData != null) {
         return Map<String, dynamic>.from(cachedData);
       }
@@ -63,7 +63,7 @@ class BoondService {
     const cacheKey = 'dictionary';
     final cache = BoondCacheService();
     if (!forceRefresh) {
-      final cachedData = await cache.get(cacheKey);
+      final cachedData = await cache.get(cacheKey, ttl: const Duration(days: 7));
       if (cachedData != null) {
         return Map<String, dynamic>.from(cachedData);
       }
@@ -154,14 +154,29 @@ class BoondService {
     }
   }
 
-  /// Récupère les prestations (deliveries) associées à un projet
-  Future<List<dynamic>> getDeliveries(int projectId) async {
+  /// Récupère les prestations (deliveries) associées à un projet avec cache de 24h
+  Future<List<dynamic>> getDeliveries(int projectId, {bool forceRefresh = false}) async {
+    final cacheKey = 'deliveries_$projectId';
+    final cache = BoondCacheService();
+    
+    if (!forceRefresh) {
+      final cachedData = await cache.get(cacheKey, ttl: const Duration(hours: 24));
+      if (cachedData != null) {
+        return List<dynamic>.from(cachedData);
+      }
+    }
+
     try {
       final response = await _dio.get('projects/$projectId/deliveries-groupments');
       final dynamic data = response.data['data'];
-      if (data is List) return data;
-      if (data != null) return [data];
-      return [];
+      List<dynamic> results = [];
+      if (data is List) {
+        results = data;
+      } else if (data != null) {
+        results = [data];
+      }
+      await cache.put(cacheKey, results);
+      return results;
     } on DioException catch (e) {
       // Extraction du message Boond détaillé si disponible
       final responseData = e.response?.data;
@@ -228,7 +243,7 @@ class BoondService {
     final cache = BoondCacheService();
     
     if (!forceRefresh) {
-      final cachedData = await cache.get(cacheKey);
+      final cachedData = await cache.get(cacheKey, ttl: const Duration(days: 30));
       if (cachedData != null) {
         return List<String>.from(cachedData);
       }
@@ -311,31 +326,83 @@ class BoondService {
     }
   }
 
-  /// Récupère un achat spécifique
-  Future<Map<String, dynamic>> getPurchase(int id) async {
+  /// Récupère un achat spécifique avec cache de 24h
+  Future<Map<String, dynamic>> getPurchase(int id, {bool forceRefresh = false}) async {
+    final cacheKey = 'purchase_$id';
+    final cache = BoondCacheService();
+    if (!forceRefresh) {
+      final cachedData = await cache.get(cacheKey, ttl: const Duration(hours: 24));
+      if (cachedData != null) {
+        return Map<String, dynamic>.from(cachedData);
+      }
+    }
     try {
       final response = await _dio.get('purchases/$id');
-      return response.data['data'];
+      final data = response.data['data'] as Map<String, dynamic>;
+      await cache.put(cacheKey, data);
+      return data;
     } catch (e) {
       throw e.toString();
     }
   }
 
-  /// Récupère une société spécifique (profil de base)
-  Future<Map<String, dynamic>> getCompany(int id) async {
+  /// Récupère un achat avec ses inclusions de contact et de société fournisseur avec cache de 24h
+  Future<Map<String, dynamic>> getPurchaseWithInclusions(int id, {bool forceRefresh = false}) async {
+    final cacheKey = 'purchase_inc_$id';
+    final cache = BoondCacheService();
+    if (!forceRefresh) {
+      final cachedData = await cache.get(cacheKey, ttl: const Duration(hours: 24));
+      if (cachedData != null) {
+        return Map<String, dynamic>.from(cachedData);
+      }
+    }
+    try {
+      final response = await _dio.get('purchases/$id', queryParameters: {
+        'include': 'providerContact,providerCompany',
+      });
+      final data = response.data as Map<String, dynamic>;
+      await cache.put(cacheKey, data);
+      return data;
+    } catch (e) {
+      throw e.toString();
+    }
+  }
+
+  /// Récupère une société spécifique (profil de base) avec cache de 3j
+  Future<Map<String, dynamic>> getCompany(int id, {bool forceRefresh = false}) async {
+    final cacheKey = 'company_$id';
+    final cache = BoondCacheService();
+    if (!forceRefresh) {
+      final cachedData = await cache.get(cacheKey, ttl: const Duration(days: 3));
+      if (cachedData != null) {
+        return Map<String, dynamic>.from(cachedData);
+      }
+    }
     try {
       final response = await _dio.get('companies/$id');
-      return response.data['data'];
+      final data = response.data['data'] as Map<String, dynamic>;
+      await cache.put(cacheKey, data);
+      return data;
     } catch (e) {
       throw e.toString();
     }
   }
 
-  /// Récupère les informations d'une société spécifique (adresse, numéro de fournisseur)
-  Future<Map<String, dynamic>> getCompanyInformation(int id) async {
+  /// Récupère les informations d'une société spécifique (adresse, numéro de fournisseur) avec cache de 3j
+  Future<Map<String, dynamic>> getCompanyInformation(int id, {bool forceRefresh = false}) async {
+    final cacheKey = 'company_info_$id';
+    final cache = BoondCacheService();
+    if (!forceRefresh) {
+      final cachedData = await cache.get(cacheKey, ttl: const Duration(days: 3));
+      if (cachedData != null) {
+        return Map<String, dynamic>.from(cachedData);
+      }
+    }
     try {
       final response = await _dio.get('companies/$id/information');
-      return response.data['data'];
+      final data = response.data['data'] as Map<String, dynamic>;
+      await cache.put(cacheKey, data);
+      return data;
     } catch (e) {
       throw e.toString();
     }
@@ -351,11 +418,21 @@ class BoondService {
     }
   }
 
-  /// Récupère une ressource spécifique
-  Future<Map<String, dynamic>> getResource(int id) async {
+  /// Récupère une ressource spécifique avec cache de 3j
+  Future<Map<String, dynamic>> getResource(int id, {bool forceRefresh = false}) async {
+    final cacheKey = 'resource_$id';
+    final cache = BoondCacheService();
+    if (!forceRefresh) {
+      final cachedData = await cache.get(cacheKey, ttl: const Duration(days: 3));
+      if (cachedData != null) {
+        return Map<String, dynamic>.from(cachedData);
+      }
+    }
     try {
       final response = await _dio.get('resources/$id');
-      return response.data['data'];
+      final data = response.data['data'] as Map<String, dynamic>;
+      await cache.put(cacheKey, data);
+      return data;
     } catch (e) {
       throw e.toString();
     }

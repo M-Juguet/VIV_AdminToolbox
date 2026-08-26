@@ -5,62 +5,7 @@ import '../../design_system/viv_colors.dart';
 import '../../design_system/viv_spacing.dart';
 import '../../design_system/viv_typography.dart';
 import '../../services/boond_service.dart';
-
-class BdcRuleKeyword {
-  String text;
-  bool caseSensitive;
-
-  BdcRuleKeyword({required this.text, this.caseSensitive = false});
-
-  Map<String, dynamic> toJson() => {
-        'text': text,
-        'caseSensitive': caseSensitive,
-      };
-
-  factory BdcRuleKeyword.fromJson(Map<String, dynamic> json) => BdcRuleKeyword(
-        text: json['text'] ?? '',
-        caseSensitive: json['caseSensitive'] ?? false,
-      );
-}
-
-class BdcRuleDemo {
-  final String id;
-  final String clientName;
-  final String clientCsoc;
-  final String contactName;
-  final String contactCcon;
-  final String projectId;
-  final List<BdcRuleKeyword> keywords;
-  final String calculationMode; // 'standard', 'sold', 'manual'
-  final double manualDays;
-  final String titleMode; // 'delivery_title', 'resource_title'
-
-  BdcRuleDemo({
-    required this.id,
-    required this.clientName,
-    required this.clientCsoc,
-    required this.contactName,
-    required this.contactCcon,
-    required this.projectId,
-    required this.keywords,
-    required this.calculationMode,
-    required this.manualDays,
-    required this.titleMode,
-  });
-
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'clientName': clientName,
-        'clientCsoc': clientCsoc,
-        'contactName': contactName,
-        'contactCcon': contactCcon,
-        'projectId': projectId,
-        'keywords': keywords.map((k) => k.toJson()).toList(),
-        'calculationMode': calculationMode,
-        'manualDays': manualDays,
-        'titleMode': titleMode,
-      };
-}
+import '../../services/bdc_rules_service.dart';
 
 class BdcRulesDiagnosticScreen extends ConsumerStatefulWidget {
   final VoidCallback onClose;
@@ -72,33 +17,8 @@ class BdcRulesDiagnosticScreen extends ConsumerStatefulWidget {
 }
 
 class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScreen> {
-  // Liste locale temporaire pour la simulation des règles enregistrées
-  final List<BdcRuleDemo> _rulesList = [
-    BdcRuleDemo(
-      id: "R-1",
-      clientName: "LOUIS VUITTON",
-      clientCsoc: "15",
-      contactName: "Jérémie TRELLE",
-      contactCcon: "42",
-      projectId: "",
-      keywords: [BdcRuleKeyword(text: "Montage vidéo", caseSensitive: false)],
-      calculationMode: "manual",
-      manualDays: 10,
-      titleMode: "delivery_title",
-    ),
-    BdcRuleDemo(
-      id: "R-2",
-      clientName: "STELLANTIS",
-      clientCsoc: "8",
-      contactName: "",
-      contactCcon: "",
-      projectId: "13",
-      keywords: [],
-      calculationMode: "sold",
-      manualDays: 0,
-      titleMode: "resource_title",
-    ),
-  ];
+  // Liste locale des règles enregistrées
+  List<BdcRule> _rulesList = [];
 
   // Données BoondManager chargées
   bool _isLoadingBoondData = false;
@@ -136,10 +56,19 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
   @override
   void initState() {
     super.initState();
-    // Charger les données BoondManager de façon asynchrone au démarrage
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadRules();
       _loadBoondData();
     });
+  }
+
+  Future<void> _loadRules() async {
+    final rules = await BdcRulesService().loadRules();
+    if (mounted) {
+      setState(() {
+        _rulesList = rules;
+      });
+    }
   }
 
   Future<void> _loadBoondData() async {
@@ -288,7 +217,7 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
     });
   }
 
-  void _openEditionForm(BdcRuleDemo rule) {
+  void _openEditionForm(BdcRule rule) {
     setState(() {
       _isFormOpen = true;
       _editingRuleId = rule.id;
@@ -328,7 +257,7 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
       return;
     }
 
-    final savedRule = BdcRuleDemo(
+    final savedRule = BdcRule(
       id: _editingRuleId ?? "R-${_rulesList.length + 1}",
       clientName: _clientName.trim(),
       clientCsoc: _clientCsoc.trim(),
@@ -354,6 +283,8 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
       _editingRuleId = null;
     });
 
+    BdcRulesService().saveRules(_rulesList);
+
     ShadToaster.of(context).show(
       ShadToast(
         title: Text(_editingRuleId != null ? "Règle mise à jour !" : "Règle enregistrée !"),
@@ -371,6 +302,7 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
         _editingRuleId = null;
       }
     });
+    BdcRulesService().saveRules(_rulesList);
     ShadToaster.of(context).show(
       ShadToast.destructive(
         title: const Text("Règle supprimée"),
@@ -564,7 +496,9 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
           const SizedBox(height: 16),
 
           // Boutons pour déplier les options facultatives (Accessibles uniquement si client sélectionné)
-          Row(
+          Wrap(
+            spacing: 12,
+            runSpacing: 8,
             children: [
               if (!_showContactFields)
                 _buildAddOptionButton(
@@ -576,24 +510,20 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
                           _loadContactsForClient(_clientCsoc);
                         },
                 ),
-              if (!_showProjectField) ...[
-                if (!_showContactFields) const SizedBox(width: 12),
+              if (!_showProjectField)
                 _buildAddOptionButton(
                   label: "Cibler un projet",
                   onPressed: _clientCsoc.isEmpty
                       ? null
                       : () => setState(() => _showProjectField = true),
                 ),
-              ],
-              if (_keywords.isEmpty) ...[
-                if (!_showContactFields || !_showProjectField) const SizedBox(width: 12),
+              if (_keywords.isEmpty)
                 _buildAddOptionButton(
                   label: "Ajouter un mot-clé",
                   onPressed: _clientCsoc.isEmpty
                       ? null
                       : () => setState(() => _keywords.add(BdcRuleKeyword(text: ""))),
                 ),
-              ]
             ],
           ),
 

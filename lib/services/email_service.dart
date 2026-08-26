@@ -1,16 +1,18 @@
+import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mailer/mailer.dart';
 import 'package:mailer/smtp_server.dart';
 import '../models/app_settings.dart';
 
 class EmailService {
-  /// Envoie un e-mail via le serveur SMTP configuré
+  /// Envoie un e-mail via le serveur SMTP configuré avec pièces jointes optionnelles
   Future<void> sendEmail({
     required AppSettings settings,
     required String to,
     required String subject,
     required String body,
     List<String> bcc = const [],
+    List<File> attachments = const [],
   }) async {
     final host = settings.smtpHost;
     final port = settings.smtpPort;
@@ -43,6 +45,15 @@ class EmailService {
       for (var email in bcc) {
         if (email.trim().isNotEmpty) {
           message.bccRecipients.add(email.trim());
+        }
+      }
+    }
+
+    // Ajout éventuel des pièces jointes
+    if (attachments.isNotEmpty) {
+      for (var file in attachments) {
+        if (file.existsSync()) {
+          message.attachments.add(FileAttachment(file));
         }
       }
     }

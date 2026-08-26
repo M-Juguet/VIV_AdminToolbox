@@ -74,6 +74,24 @@ class BdcSentLogsService {
     });
   }
 
+  /// Récupère le nombre de BDC déjà générés pour un fournisseur et une année donnée
+  Future<int> getSentCountForProvider(String providerId, String year) async {
+    final db = await _dbService.database;
+    final finder = Finder(
+      filter: Filter.and([
+        Filter.equals('providerId', providerId),
+        Filter.custom((record) {
+          final val = record.value as Map?;
+          final sentAt = val?['sentAt']?.toString() ?? '';
+          final period = val?['period']?.toString() ?? '';
+          return sentAt.contains(year) || period.contains(year);
+        }),
+      ]),
+    );
+    final records = await _store.find(db, finder: finder);
+    return records.length;
+  }
+
   /// Récupère l'historique d'envoi pour un fournisseur et une période donnée
   Future<Map<String, dynamic>?> getSentLog(String providerId, String period) async {
     final db = await _dbService.database;

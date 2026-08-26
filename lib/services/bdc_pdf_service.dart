@@ -7,6 +7,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:opsis_app/screens/bdc_screen.dart'; // Pour importer BdcPrestaStep2
 import 'package:image/image.dart' as img;
+import 'package:opsis_app/services/bdc_sent_logs_service.dart';
 
 class BdcPdfService {
   /// Génère le PDF d'un bon de commande sous forme d'octets (Uint8List).
@@ -46,15 +47,19 @@ class BdcPdfService {
       boldItalic: boldItalicFont,
     );
 
-    // Déterminer les dates de début et de fin du mois
-    final String startDate = "01/$periodMonth/$periodYear";
-    final String endDate = "${_getLastDayOfMonth(periodMonth, periodYear)}/$periodMonth/$periodYear";
+    // Récupérer les dates réelles de la prestation
+    final String startDate = presta.startDate;
+    final String endDate = presta.endDate;
 
     // Date du jour pour la signature ("Le $TODAY$")
     final String todayDate = DateFormat('dd/MM/yyyy').format(DateTime.now());
 
-    // Récupérer les informations du fournisseur (mockées)
-    final providerInfo = _getProviderInfo(presta.clientName, presta.consultantName);
+    // Calculer le numéro séquentiel dynamique du BDC pour ce fournisseur et cette année
+    final logsService = BdcSentLogsService();
+    final int existingCount = await logsService.getSentCountForProvider(presta.providerId, periodYear);
+    final String seqStr = (existingCount + 1).toString().padLeft(2, '0');
+    final String yearSuffix = periodYear.substring(periodYear.length - 2);
+    final String bdcNumber = "VIV-PO-CSOC${presta.providerId}-$yearSuffix$seqStr";
 
     // Charger l'image du logo Viv blanc depuis les assets de manière robuste (CPU-only)
     final logoImage = await _loadRobustImage('assets/images/viv-horizontal-white-sm.png');
@@ -129,7 +134,7 @@ class BdcPdfService {
                                 ),
                               ),
                               pw.TextSpan(
-                                text: "N° VIV-PO-${providerInfo.providerId}-2601",
+                                text: "N° $bdcNumber",
                                 style: pw.TextStyle(
                                   fontSize: 18,
                                   fontWeight: pw.FontWeight.bold,
@@ -189,7 +194,7 @@ class BdcPdfService {
                                 crossAxisAlignment: pw.CrossAxisAlignment.start,
                                 children: [
                                   pw.Text(
-                                    "Réf. Contrat fournisseur : 2026-${providerInfo.providerId}",
+                                    "Réf. Contrat fournisseur : $periodYear-CSOC${presta.providerId}",
                                     style: pw.TextStyle(
                                       fontWeight: pw.FontWeight.bold,
                                       fontSize: 10,
@@ -197,10 +202,10 @@ class BdcPdfService {
                                     ),
                                   ),
                                   pw.SizedBox(height: 6),
-                                  pw.Text(providerInfo.companyName, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9)),
-                                  pw.Text(providerInfo.address, style: pw.TextStyle(fontSize: 9)),
-                                  pw.Text("${providerInfo.postcode} ${providerInfo.town}", style: pw.TextStyle(fontSize: 9)),
-                                  pw.Text(providerInfo.country, style: pw.TextStyle(fontSize: 9)),
+                                  pw.Text(presta.providerName, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9)),
+                                  pw.Text(presta.providerAddress, style: pw.TextStyle(fontSize: 9)),
+                                  pw.Text("${presta.providerPostcode} ${presta.providerTown}", style: pw.TextStyle(fontSize: 9)),
+                                  pw.Text(presta.providerCountry, style: pw.TextStyle(fontSize: 9)),
                                 ],
                               ),
                             ),
@@ -227,7 +232,7 @@ class BdcPdfService {
                       pw.Row(
                         children: [
                           pw.Text("N° du Bon de commande : ", style: pw.TextStyle(fontSize: 9)),
-                          pw.Text("VIV-PO-${providerInfo.providerId}-2601", style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+                          pw.Text(bdcNumber, style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
                         ],
                       ),
                       pw.SizedBox(height: 12),
@@ -256,7 +261,10 @@ class BdcPdfService {
                           // Ligne de contenu
                           pw.TableRow(
                             children: [
-                              _buildTableCell(presta.prestationTitle), // Uniquement l'intitulé de la prestation (sans ressource)
+                              _buildTableCell(
+                                presta.prestationRef,
+                                subtitle: presta.prestationTitle.replaceAll(RegExp(r'^MIS\d+\s*-\s*'), ''),
+                              ),
                               _buildTableCell(startDate, alignCenter: true),
                               _buildTableCell(endDate, alignCenter: true),
                               _buildTableCell("UO", alignCenter: true),
@@ -533,55 +541,6 @@ class BdcPdfService {
     );
   }
 
-  static int _getLastDayOfMonth(String monthCode, String yearCode) {
-    final int year = int.tryParse(yearCode) ?? 2026;
-    switch (monthCode) {
-      case '02':
-        // Année bissextile simple
-        return (year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)) ? 29 : 28;
-      case '04':
-      case '06':
-      case '09':
-      case '11':
-        return 30;
-      default:
-        return 31;
-    }
-  }
-
-  // --- MOCK PROVIDERS INFO ---
-
-  static _BdcProviderMockInfo _getProviderInfo(String clientName, String consultantName) {
-    if (clientName == "LOUIS VUITTON") {
-      return _BdcProviderMockInfo(
-        providerId: "CSOC15",
-        companyName: "John DOE & Cie",
-        address: "10 avenue des Champs Elysées",
-        postcode: "75008",
-        town: "Paris",
-        country: "France",
-      );
-    } else if (clientName == "STELLANTIS") {
-      return _BdcProviderMockInfo(
-        providerId: "CSOC22",
-        companyName: "Audrey Production",
-        address: "42 rue du Cinéma",
-        postcode: "92100",
-        town: "Boulogne-Billancourt",
-        country: "France",
-      );
-    } else {
-      return _BdcProviderMockInfo(
-        providerId: "CSOC9",
-        companyName: "Dujardin SAS",
-        address: "8 impasse de la Comédie",
-        postcode: "33000",
-        town: "Bordeaux",
-        country: "France",
-      );
-    }
-  }
-
   static Future<pw.ImageProvider?> _loadRobustImage(String assetPath) async {
     try {
       Uint8List bytes;
@@ -622,22 +581,4 @@ class BdcPdfService {
       return null;
     }
   }
-}
-
-class _BdcProviderMockInfo {
-  final String providerId;
-  final String companyName;
-  final String address;
-  final String postcode;
-  final String town;
-  final String country;
-
-  _BdcProviderMockInfo({
-    required this.providerId,
-    required this.companyName,
-    required this.address,
-    required this.postcode,
-    required this.town,
-    required this.country,
-  });
 }
