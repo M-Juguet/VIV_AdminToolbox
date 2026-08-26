@@ -246,7 +246,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
       final resourceStates = dict['data']?['setting']?['state']?['resource'] as List? ?? [];
       int? exitStateId;
       for (var state in resourceStates) {
-        final label = state['label']?.toString().toLowerCase() ?? '';
+        final label = (state['value'] ?? state['label'] ?? '').toString().toLowerCase();
         if (label.contains('sortie')) {
           exitStateId = int.tryParse(state['id']?.toString() ?? '');
           break;
@@ -655,7 +655,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
       final resourceStates = dict['data']?['setting']?['state']?['resource'] as List? ?? [];
       int? exitStateId;
       for (var state in resourceStates) {
-        final label = state['label']?.toString().toLowerCase() ?? '';
+        final label = (state['value'] ?? state['label'] ?? '').toString().toLowerCase();
         if (label.contains('sortie')) {
           exitStateId = int.tryParse(state['id']?.toString() ?? '');
           break;

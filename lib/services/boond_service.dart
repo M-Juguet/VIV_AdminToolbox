@@ -429,7 +429,7 @@ class BoondService {
       }
     }
     try {
-      final response = await _dio.get('resources/$id');
+      final response = await _dio.get('resources/$id/information');
       final data = response.data['data'] as Map<String, dynamic>;
       await cache.put(cacheKey, data);
       return data;
