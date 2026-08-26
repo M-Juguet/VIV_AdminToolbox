@@ -1,5 +1,5 @@
 #define MyAppName "VIV Admin Toolbox"
-#define MyAppVersion "0.1.2"
+#define MyAppVersion "0.1.3"
 #define MyAppPublisher "M-Juguet"
 #define MyAppExeName "opsis_app.exe"
 #define AppId "{{8E9E40B7-7A2D-4B81-9A32-9F1F350711B8}"
@@ -16,7 +16,7 @@ PrivilegesRequired=lowest
 DefaultDirName={userpf}\{#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=.\installers
-OutputBaseFilename=opsis_update
+OutputBaseFilename=opsis_app_v{#MyAppVersion}
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
