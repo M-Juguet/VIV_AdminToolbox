@@ -169,6 +169,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
   int _maxUnlockedStep = 0; // 0: Détection initiale, 1: Étape 1 déverrouillée, 2: Étape 2 déverrouillée
   bool _isLoadingDetection = false;
   bool _isSendingMails = false;
+  final Set<String> _loadingItems = {};
 
   // Variables de filtrage et recherche (Phase 1)
   String _searchQuery = "";
@@ -540,6 +541,9 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
           detectedCandidates.add(candidate);
         }
       }
+      
+      // Trier par ordre alphabétique du nom de la ressource
+      detectedCandidates.sort((a, b) => a.consultantName.toLowerCase().compareTo(b.consultantName.toLowerCase()));
 
       if (mounted) {
         setState(() {
@@ -562,6 +566,290 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
         );
       }
     }
+  }
+
+  Future<void> _refreshSingleCandidate(BdcPrestaStep1 item) async {
+    setState(() {
+      _loadingItems.add(item.id);
+    });
+
+    try {
+      final service = ref.read(boondServiceProvider);
+      final logsService = BdcSentLogsService();
+      
+      final projectId = int.parse(item.projectId);
+      final deliveryId = item.id;
+
+      // Charger les détails de la prestation en direct (sans cache ou avec forceRefresh)
+      final List<dynamic> deliveries = await service.getDeliveries(projectId, forceRefresh: true);
+      
+      // Trouver notre delivery spécifique
+      final delivery = deliveries.firstWhere(
+        (d) => d['id']?.toString() == deliveryId,
+        orElse: () => null,
+      );
+
+      if (delivery == null) {
+        throw "Prestation non trouvée sur BoondManager.";
+      }
+
+      final delAttr = delivery['attributes'] ?? {};
+      final delTitle = delAttr['title']?.toString() ?? 'Prestation sans titre';
+      final delRef = delAttr['reference']?.toString() ?? "MIS$deliveryId";
+      final delTitleWithRef = "$delRef - $delTitle";
+      final purchaseRel = delivery['relationships']?['purchase']?['data'];
+
+      // Résoudre le nom de la ressource
+      final resourceRel = delivery['relationships']?['resource']?['data'];
+      final resourceId = resourceRel?['id']?.toString() ?? '';
+      String resourceName = "Ressource inconnue";
+      String? consultantTitle;
+
+      if (resourceId.isNotEmpty) {
+        final resourceInt = int.tryParse(resourceId);
+        if (resourceInt != null) {
+          final resData = await service.getResource(resourceInt, forceRefresh: true);
+          final resAttr = resData['attributes'] ?? {};
+          final firstName = resAttr['firstName']?.toString() ?? '';
+          final lastName = resAttr['lastName']?.toString() ?? '';
+          resourceName = "$firstName $lastName".trim();
+          consultantTitle = resAttr['title']?.toString();
+        }
+      }
+
+      // Résoudre les infos fournisseur (Société + Contact)
+      String providerName = "Aucun";
+      String providerId = "Aucun";
+      String? alertMessage;
+      String contactEmail = "";
+      String? providerContactId;
+      String? purchaseIdStr;
+      
+      String providerAddress = "";
+      String providerPostcode = "";
+      String providerTown = "";
+      String providerCountry = "";
+
+      if (purchaseRel == null) {
+        alertMessage = "Aucun Achat associé à la prestation.";
+      } else {
+        final purchaseId = int.tryParse(purchaseRel['id']?.toString() ?? '');
+        purchaseIdStr = purchaseId?.toString();
+        if (purchaseId != null) {
+          final pResponse = await service.getPurchaseWithInclusions(purchaseId, forceRefresh: true);
+          final pIncluded = pResponse['included'] as List? ?? [];
+          
+          final compObj = pIncluded.firstWhere(
+            (i) => i['type'] == 'companies' || i['type'] == 'company',
+            orElse: () => null,
+          );
+          if (compObj != null) {
+            providerName = compObj['attributes']?['name']?.toString() ?? 'Société sans nom';
+            providerId = compObj['id']?.toString() ?? '';
+            
+            final compIdInt = int.tryParse(providerId);
+            if (compIdInt != null) {
+              try {
+                final compInfo = await service.getCompanyInformation(compIdInt, forceRefresh: true);
+                final infoAttr = compInfo['attributes'] ?? {};
+                providerAddress = infoAttr['address']?.toString() ?? '';
+                providerPostcode = infoAttr['postcode']?.toString() ?? '';
+                providerTown = infoAttr['town']?.toString() ?? '';
+                providerCountry = infoAttr['country']?.toString() ?? '';
+              } catch (_) {}
+            }
+          }
+
+          final contactObj = pIncluded.firstWhere(
+            (i) => i['type'] == 'contacts' || i['type'] == 'contact',
+            orElse: () => null,
+          );
+          if (contactObj != null) {
+            providerContactId = contactObj['id']?.toString();
+            final cAttr = contactObj['attributes'] ?? {};
+            contactEmail = (cAttr['email'] ??
+                    cAttr['email1'] ??
+                    cAttr['emailOne'] ??
+                    cAttr['emailPro'] ??
+                    '')
+                .toString();
+          } else if (providerId != "Aucun" && providerId.isNotEmpty) {
+            final companyIdInt = int.tryParse(providerId);
+            if (companyIdInt != null) {
+              final contactsList = await service.getCompanyContacts(companyIdInt);
+              if (contactsList.isEmpty) {
+                alertMessage = "Aucun contact administratif renseigné pour le fournisseur";
+              } else if (contactsList.length == 1) {
+                final singleContact = contactsList.first;
+                providerContactId = singleContact['id']?.toString();
+                final cAttr = singleContact['attributes'] ?? {};
+                contactEmail = (cAttr['email'] ??
+                        cAttr['email1'] ??
+                        cAttr['emailOne'] ??
+                        cAttr['emailPro'] ??
+                        '')
+                    .toString();
+              } else {
+                final dict = await service.getDictionary(forceRefresh: true);
+                final contactStates = dict['data']?['setting']?['state']?['contact'] as List? ?? [];
+                int? supplierStateId;
+                for (var state in contactStates) {
+                  final label = state['label']?.toString().toLowerCase() ?? '';
+                  if (label.contains('fournisseur')) {
+                    supplierStateId = int.tryParse(state['id']?.toString() ?? '');
+                    break;
+                  }
+                }
+
+                final supplierContacts = contactsList.where((c) {
+                  final stateVal = int.tryParse(c['attributes']?['state']?.toString() ?? '');
+                  return stateVal != null && stateVal == supplierStateId;
+                }).toList();
+
+                if (supplierContacts.isEmpty) {
+                  alertMessage = "Aucun contact avec l'état 'Fournisseur' parmi les contacts trouvés";
+                } else if (supplierContacts.length > 1) {
+                  alertMessage = "Plusieurs contacts avec l'état 'Fournisseur' détectés.";
+                } else {
+                  final selectedContact = supplierContacts.first;
+                  providerContactId = selectedContact['id']?.toString();
+                  final cAttr = selectedContact['attributes'] ?? {};
+                  contactEmail = (cAttr['email'] ??
+                          cAttr['email1'] ??
+                          cAttr['emailOne'] ??
+                          cAttr['emailPro'] ??
+                          '')
+                      .toString();
+                }
+              }
+            }
+          }
+
+          if (alertMessage == null) {
+            if (providerId == "Aucun" || providerId.isEmpty) {
+              alertMessage = "Aucun fournisseur lié à l'achat de prestation.";
+            } else if (providerContactId == null || providerContactId.isEmpty) {
+              alertMessage = "Aucun contact administratif renseigné pour le fournisseur";
+            } else if (contactEmail.isEmpty || !contactEmail.contains('@')) {
+              alertMessage = "E-mail de contact non renseigné";
+            }
+          }
+        } else {
+          alertMessage = "Aucun achat associé.";
+        }
+      }
+
+      // Extraire la quantité vendue et le TJM d'achat
+      final double quantitySold = double.tryParse(delAttr['numberOfDaysInvoicedOrQuantity']?.toString() ?? '0') ?? 0;
+      final double costsSimulated = double.tryParse(delAttr['costsSimulatedExcludingTax']?.toString() ?? '0') ?? 0;
+      double averageDailyCost = 0;
+      if (quantitySold > 0) {
+        averageDailyCost = costsSimulated / quantitySold;
+      }
+
+      // Extraire les dates réelles
+      final displayStartDate = delAttr['startDate']?.toString() ?? '';
+      final displayEndDate = delAttr['endDate']?.toString() ?? '';
+
+      // Créer le candidat rafraîchi
+      final refreshed = BdcPrestaStep1(
+        id: deliveryId,
+        consultantName: resourceName,
+        providerName: providerName,
+        providerId: providerId,
+        projectName: item.projectName,
+        clientName: item.clientName,
+        title: delTitleWithRef,
+        alertMessage: alertMessage,
+        boondLink: item.boondLink,
+        isSelected: alertMessage == null && !item.isAlreadySent, // reste décoché si non conforme ou déjà envoyé
+        isAlreadySent: item.isAlreadySent,
+        sentDate: item.sentDate,
+        tjmAchat: averageDailyCost,
+        quantitySold: quantitySold,
+        consultantTitle: consultantTitle,
+        clientCsoc: item.clientCsoc,
+        projectId: item.projectId,
+        providerEmail: contactEmail,
+        providerContactId: providerContactId,
+        purchaseId: purchaseIdStr,
+        providerAddress: providerAddress,
+        providerPostcode: providerPostcode,
+        providerTown: providerTown,
+        providerCountry: providerCountry,
+        startDate: displayStartDate,
+        endDate: displayEndDate,
+        prestationRef: delRef,
+        projectRef: item.projectRef,
+      );
+
+      // Vérifier le log d'envoi en local pour synchroniser isAlreadySent
+      final period = '$_selectedMonth/$_selectedYear';
+      final log = await logsService.getSentLog(refreshed.providerId, period);
+      if (log != null) {
+        refreshed.isAlreadySent = true;
+        final sentAtStr = log['sentAt'] as String?;
+        if (sentAtStr != null) {
+          final sentAt = DateTime.parse(sentAtStr);
+          refreshed.sentDate = "${sentAt.day.toString().padLeft(2, '0')}/${sentAt.month.toString().padLeft(2, '0')}/${sentAt.year}";
+        }
+        refreshed.isSelected = false;
+      }
+
+      // Mettre à jour l'élément dans la liste des candidats
+      setState(() {
+        final index = _step1Candidates.indexWhere((x) => x.id == item.id);
+        if (index != -1) {
+          _step1Candidates[index] = refreshed;
+        }
+        _loadingItems.remove(item.id);
+      });
+      
+      if (mounted) {
+        ShadToaster.of(context).show(
+          ShadToast(
+            title: const Text("Actualisation réussie"),
+            description: Text("Les données de ${item.consultantName} ont été mises à jour."),
+          ),
+        );
+      }
+    } catch (e) {
+      setState(() {
+        _loadingItems.remove(item.id);
+      });
+      if (mounted) {
+        ShadToaster.of(context).show(
+          ShadToast.destructive(
+            title: const Text("Échec de l'actualisation"),
+            description: Text("Impossible de rafraîchir cette ligne : $e"),
+          ),
+        );
+      }
+    }
+  }
+
+  Widget _buildRowRefreshButton(BdcPrestaStep1 item) {
+    final isLoading = _loadingItems.contains(item.id);
+    
+    return isLoading
+        ? const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 8.0),
+            child: SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(strokeWidth: 2, color: VivColors.gray400),
+            ),
+          )
+        : IconButton(
+            icon: const Icon(LucideIcons.rotateCw, size: 14, color: VivColors.gray400),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+            style: IconButton.styleFrom(
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            onPressed: () => _refreshSingleCandidate(item),
+            tooltip: "Actualiser cette prestation",
+          );
   }
 
   void _calculateSelected(List<BdcPrestaStep1> filteredList) async {
@@ -1257,7 +1545,9 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                             onPressed: () {
                               setState(() {
                                 for (var c in filteredList) {
-                                  c.isSelected = true;
+                                  if (c.alertMessage == null) {
+                                    c.isSelected = true;
+                                  }
                                 }
                               });
                             },
@@ -1276,22 +1566,6 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                               });
                             },
                             child: const Text("Tout décocher", style: TextStyle(color: Colors.black, fontSize: 11, fontWeight: FontWeight.bold)),
-                          ),
-                          const SizedBox(
-                            height: 12,
-                            child: VerticalDivider(width: 16, color: VivColors.gray300),
-                          ),
-                          TextButton(
-                            onPressed: () {
-                              setState(() {
-                                for (var c in filteredList) {
-                                  if (c.alertMessage != null) {
-                                    c.isSelected = false;
-                                  }
-                                }
-                              });
-                            },
-                            child: const Text("Décocher les non conformes", style: TextStyle(color: Colors.redAccent, fontSize: 11, fontWeight: FontWeight.bold)),
                           ),
                         ],
                       ),
@@ -1364,16 +1638,20 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                               color: item.isSelected ? Colors.white : Colors.grey.shade50.withAlpha((0.5 * 255).round()),
                               child: Row(
                                 children: [
-                                  Checkbox(
-                                    value: item.isSelected,
-                                    activeColor: Colors.black,
-                                    onChanged: (val) {
-                                      setState(() {
-                                        item.isSelected = val ?? false;
-                                      });
-                                    },
-                                  ),
-                                  const SizedBox(width: 12),
+                                  if (hasAlert)
+                                    const SizedBox(width: 44)
+                                  else ...[
+                                    Checkbox(
+                                      value: item.isSelected,
+                                      activeColor: Colors.black,
+                                      onChanged: (val) {
+                                        setState(() {
+                                          item.isSelected = val ?? false;
+                                        });
+                                      },
+                                    ),
+                                    const SizedBox(width: 12),
+                                  ],
                                   Expanded(
                                     flex: 3,
                                     child: Column(
@@ -1484,6 +1762,8 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                                                 },
                                                 child: const Text("Corriger", style: TextStyle(color: Colors.redAccent, fontSize: 10, fontWeight: FontWeight.bold)),
                                               ),
+                                              const SizedBox(width: 8),
+                                              _buildRowRefreshButton(item),
                                             ],
                                           )
                                         : item.isAlreadySent
@@ -1520,13 +1800,19 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                                                       ],
                                                     ),
                                                   ),
+                                                  const SizedBox(width: 8),
+                                                  _buildRowRefreshButton(item),
                                                 ],
                                               )
-                                            : const Row(
+                                            : Row(
                                                 children: [
-                                                  Icon(LucideIcons.check, color: Colors.teal, size: 16),
-                                                  SizedBox(width: 8),
-                                                  Text("Fiche administrative conforme", style: TextStyle(color: Colors.teal, fontSize: 11)),
+                                                  const Icon(LucideIcons.check, color: Colors.teal, size: 16),
+                                                  const SizedBox(width: 8),
+                                                  const Expanded(
+                                                    child: Text("Fiche administrative conforme", style: TextStyle(color: Colors.teal, fontSize: 11)),
+                                                  ),
+                                                  const SizedBox(width: 8),
+                                                  _buildRowRefreshButton(item),
                                                 ],
                                               ),
                                   ),
