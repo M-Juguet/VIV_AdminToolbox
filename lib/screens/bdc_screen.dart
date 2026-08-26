@@ -600,8 +600,8 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
       final purchaseRel = delivery['relationships']?['purchase']?['data'];
 
       // Résoudre le nom de la ressource
-      final resourceRel = delivery['relationships']?['resource']?['data'];
-      final resourceId = resourceRel?['id']?.toString() ?? '';
+      final dependsOn = delivery['relationships']?['dependsOn']?['data'];
+      final resourceId = dependsOn?['id']?.toString() ?? '';
       String resourceName = "Ressource inconnue";
       String? consultantTitle;
 
