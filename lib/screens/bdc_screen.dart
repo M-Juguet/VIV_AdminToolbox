@@ -432,6 +432,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                            if (adminTypeId == null) return false;
                            final typeAttr = c['attributes']?['type'];
                            final typesAttr = c['attributes']?['types'];
+                           final typesOfAttr = c['attributes']?['typesOf'];
                            
                            final List<String> rawValues = [];
                            if (typeAttr != null) {
@@ -448,6 +449,13 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                                rawValues.addAll(typesAttr.toString().split('|'));
                              }
                            }
+                           if (typesOfAttr != null) {
+                             if (typesOfAttr is List) {
+                               rawValues.addAll(typesOfAttr.map((e) => e.toString()));
+                             } else {
+                               rawValues.addAll(typesOfAttr.toString().split('|'));
+                             }
+                           }
                            
                            final cleanValues = rawValues
                                .map((e) => e.trim())
@@ -457,25 +465,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                            return cleanValues.contains(adminTypeId.toString());
                          }).toList();
 
-                          try {
-                            final StringBuffer logBuffer = StringBuffer();
-                            logBuffer.writeln("=== DEBUG CONTACTS DETECTION ===");
-                            logBuffer.writeln("Dio Base URL : ${service.baseUrl}");
-                            logBuffer.writeln("adminTypeId : $adminTypeId");
-                            if (contactsList.isNotEmpty) {
-                              final firstC = contactsList.first;
-                              logBuffer.writeln("Contact keys: ${firstC['attributes']?.keys.toList()}");
-                            }
-                            for (var c in contactsList) {
-                              final typeAttr = c['attributes']?['type'];
-                              final typesAttr = c['attributes']?['types'];
-                              final name = "${c['attributes']?['firstName']} ${c['attributes']?['lastName']}";
-                              logBuffer.writeln(" - Contact: $name, type: $typeAttr, types: $typesAttr");
-                            }
-                            logBuffer.writeln("adminContacts count : ${adminContacts.length}");
-                            final logFile = File('C:\\Users\\stati\\.gemini\\antigravity\\brain\\2d366e5c-3537-42cd-8cc7-7570a907bd0c\\debug_contacts_log.txt');
-                            logFile.writeAsStringSync(logBuffer.toString(), mode: FileMode.append);
-                          } catch (_) {}
+
 
                          if (adminContacts.isEmpty) {
                           alertMessage = "Aucun contact administratif parmi les contacts trouvés.";
@@ -828,6 +818,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                   if (adminTypeId == null) return false;
                   final typeAttr = c['attributes']?['type'];
                   final typesAttr = c['attributes']?['types'];
+                  final typesOfAttr = c['attributes']?['typesOf'];
                   
                   final List<String> rawValues = [];
                   if (typeAttr != null) {
@@ -844,6 +835,13 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                       rawValues.addAll(typesAttr.toString().split('|'));
                     }
                   }
+                  if (typesOfAttr != null) {
+                    if (typesOfAttr is List) {
+                      rawValues.addAll(typesOfAttr.map((e) => e.toString()));
+                    } else {
+                      rawValues.addAll(typesOfAttr.toString().split('|'));
+                    }
+                  }
                   
                   final cleanValues = rawValues
                       .map((e) => e.trim())
@@ -853,25 +851,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                   return cleanValues.contains(adminTypeId.toString());
                 }).toList();
 
-                 try {
-                   final StringBuffer logBuffer = StringBuffer();
-                    logBuffer.writeln("=== DEBUG CONTACTS REFRESH ===");
-                    logBuffer.writeln("Dio Base URL : ${service.baseUrl}");
-                    if (contactsList.isNotEmpty) {
-                      final firstC = contactsList.first;
-                      logBuffer.writeln("Contact keys: ${firstC['attributes']?.keys.toList()}");
-                    }
-                   logBuffer.writeln("adminTypeId : $adminTypeId");
-                   for (var c in contactsList) {
-                     final typeAttr = c['attributes']?['type'];
-                     final typesAttr = c['attributes']?['types'];
-                     final name = "${c['attributes']?['firstName']} ${c['attributes']?['lastName']}";
-                     logBuffer.writeln(" - Contact: $name, type: $typeAttr, types: $typesAttr");
-                   }
-                   logBuffer.writeln("adminContacts count : ${adminContacts.length}");
-                   final logFile = File('C:\\Users\\stati\\.gemini\\antigravity\\brain\\2d366e5c-3537-42cd-8cc7-7570a907bd0c\\debug_contacts_log.txt');
-                   logFile.writeAsStringSync(logBuffer.toString(), mode: FileMode.append);
-                 } catch (_) {}
+
 
                  if (adminContacts.isEmpty) {
                   alertMessage = "Aucun contact administratif parmi les contacts trouvés.";
