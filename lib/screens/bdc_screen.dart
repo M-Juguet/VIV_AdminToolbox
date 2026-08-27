@@ -428,30 +428,10 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                           }
                         }
 
-                        final StringBuffer logBuffer = StringBuffer();
-                        logBuffer.writeln("=== DEBUG CONTACTS DETECTION ===");
-                        logBuffer.writeln("adminTypeId : $adminTypeId");
-                        logBuffer.writeln("contactTypes list: $contactTypes");
-
                         final adminContacts = contactsList.where((c) {
-                          final typesAttr = c['attributes']?['types'];
-                          final List<String> contactTypesList = typesAttr is List 
-                              ? typesAttr.map((e) => e.toString()).toList() 
-                              : (typesAttr?.toString().split('|') ?? []);
-                          
-                          final name = "${c['attributes']?['firstName']} ${c['attributes']?['lastName']}";
-                          final isMatch = adminTypeId != null && contactTypesList.contains(adminTypeId.toString());
-                          
-                          logBuffer.writeln(" - Contact: $name, typesAttr: $typesAttr (Type: ${typesAttr.runtimeType}), contactTypesList: $contactTypesList, isMatch: $isMatch");
-                          
-                          return isMatch;
+                          final typeVal = int.tryParse(c['attributes']?['type']?.toString() ?? '');
+                          return adminTypeId != null && typeVal == adminTypeId;
                         }).toList();
-
-                        logBuffer.writeln("adminContacts count: ${adminContacts.length}");
-                        try {
-                          final logFile = File('C:\\Users\\stati\\.gemini\\antigravity\\brain\\2d366e5c-3537-42cd-8cc7-7570a907bd0c\\debug_contacts_log.txt');
-                          logFile.writeAsStringSync(logBuffer.toString(), mode: FileMode.append);
-                        } catch (_) {}
 
                         if (adminContacts.isEmpty) {
                           alertMessage = "Aucun contact administratif parmi les contacts trouvés.";
@@ -800,30 +780,10 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                   }
                 }
 
-                final StringBuffer logBuffer = StringBuffer();
-                logBuffer.writeln("=== DEBUG CONTACTS REFRESH ===");
-                logBuffer.writeln("adminTypeId : $adminTypeId");
-                logBuffer.writeln("contactTypes list: $contactTypes");
-
                 final adminContacts = contactsList.where((c) {
-                  final typesAttr = c['attributes']?['types'];
-                  final List<String> contactTypesList = typesAttr is List 
-                      ? typesAttr.map((e) => e.toString()).toList() 
-                      : (typesAttr?.toString().split('|') ?? []);
-                  
-                  final name = "${c['attributes']?['firstName']} ${c['attributes']?['lastName']}";
-                  final isMatch = adminTypeId != null && contactTypesList.contains(adminTypeId.toString());
-                  
-                  logBuffer.writeln(" - Contact: $name, typesAttr: $typesAttr (Type: ${typesAttr.runtimeType}), contactTypesList: $contactTypesList, isMatch: $isMatch");
-                  
-                  return isMatch;
+                  final typeVal = int.tryParse(c['attributes']?['type']?.toString() ?? '');
+                  return adminTypeId != null && typeVal == adminTypeId;
                 }).toList();
-
-                logBuffer.writeln("adminContacts count: ${adminContacts.length}");
-                try {
-                  final logFile = File('C:\\Users\\stati\\.gemini\\antigravity\\brain\\2d366e5c-3537-42cd-8cc7-7570a907bd0c\\debug_contacts_log.txt');
-                  logFile.writeAsStringSync(logBuffer.toString(), mode: FileMode.append);
-                } catch (_) {}
 
                 if (adminContacts.isEmpty) {
                   alertMessage = "Aucun contact administratif parmi les contacts trouvés.";
