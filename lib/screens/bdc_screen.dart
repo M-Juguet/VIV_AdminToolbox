@@ -242,7 +242,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
       _holidays = await service.getHolidays(yearInt);
 
       // Charger le dictionnaire pour obtenir l'ID de l'état "Sortie"
-      final dict = await service.getDictionary();
+      final dict = await service.getDictionary(forceRefresh: true);
       final resourceStates = dict['data']?['setting']?['state']?['resource'] as List? ?? [];
       int? exitStateId;
       for (var state in resourceStates) {
@@ -654,7 +654,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
       bool isResourceExit = false;
 
       // Charger le dictionnaire pour obtenir l'ID de l'état "Sortie"
-      final dict = await service.getDictionary();
+      final dict = await service.getDictionary(forceRefresh: true);
       final resourceStates = dict['data']?['setting']?['state']?['resource'] as List? ?? [];
       int? exitStateId;
       for (var state in resourceStates) {
