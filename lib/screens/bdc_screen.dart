@@ -457,20 +457,25 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                            return cleanValues.contains(adminTypeId.toString());
                          }).toList();
 
-                         try {
-                           final StringBuffer logBuffer = StringBuffer();
-                           logBuffer.writeln("=== DEBUG CONTACTS DETECTION ===");
-                           logBuffer.writeln("adminTypeId : $adminTypeId");
-                           for (var c in contactsList) {
-                             final typeAttr = c['attributes']?['type'];
-                             final typesAttr = c['attributes']?['types'];
-                             final name = "${c['attributes']?['firstName']} ${c['attributes']?['lastName']}";
-                             logBuffer.writeln(" - Contact: $name, type: $typeAttr, types: $typesAttr");
-                           }
-                           logBuffer.writeln("adminContacts count : ${adminContacts.length}");
-                           final logFile = File('C:\\Users\\stati\\.gemini\\antigravity\\brain\\2d366e5c-3537-42cd-8cc7-7570a907bd0c\\debug_contacts_log.txt');
-                           logFile.writeAsStringSync(logBuffer.toString(), mode: FileMode.append);
-                         } catch (_) {}
+                          try {
+                            final StringBuffer logBuffer = StringBuffer();
+                            logBuffer.writeln("=== DEBUG CONTACTS DETECTION ===");
+                            logBuffer.writeln("Dio Base URL : ${service.baseUrl}");
+                            logBuffer.writeln("adminTypeId : $adminTypeId");
+                            if (contactsList.isNotEmpty) {
+                              final firstC = contactsList.first;
+                              logBuffer.writeln("Contact keys: ${firstC['attributes']?.keys.toList()}");
+                            }
+                            for (var c in contactsList) {
+                              final typeAttr = c['attributes']?['type'];
+                              final typesAttr = c['attributes']?['types'];
+                              final name = "${c['attributes']?['firstName']} ${c['attributes']?['lastName']}";
+                              logBuffer.writeln(" - Contact: $name, type: $typeAttr, types: $typesAttr");
+                            }
+                            logBuffer.writeln("adminContacts count : ${adminContacts.length}");
+                            final logFile = File('C:\\Users\\stati\\.gemini\\antigravity\\brain\\2d366e5c-3537-42cd-8cc7-7570a907bd0c\\debug_contacts_log.txt');
+                            logFile.writeAsStringSync(logBuffer.toString(), mode: FileMode.append);
+                          } catch (_) {}
 
                          if (adminContacts.isEmpty) {
                           alertMessage = "Aucun contact administratif parmi les contacts trouvés.";
@@ -850,7 +855,12 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
 
                  try {
                    final StringBuffer logBuffer = StringBuffer();
-                   logBuffer.writeln("=== DEBUG CONTACTS REFRESH ===");
+                    logBuffer.writeln("=== DEBUG CONTACTS REFRESH ===");
+                    logBuffer.writeln("Dio Base URL : ${service.baseUrl}");
+                    if (contactsList.isNotEmpty) {
+                      final firstC = contactsList.first;
+                      logBuffer.writeln("Contact keys: ${firstC['attributes']?.keys.toList()}");
+                    }
                    logBuffer.writeln("adminTypeId : $adminTypeId");
                    for (var c in contactsList) {
                      final typeAttr = c['attributes']?['type'];
