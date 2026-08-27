@@ -403,7 +403,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                     try {
                       final contactsList = await service.getCompanyContacts(companyIdInt);
                       if (contactsList.isEmpty) {
-                        alertMessage = "Aucun contact administratif renseigné pour le fournisseur";
+                        alertMessage = "Aucun contact renseigné pour le fournisseur.";
                       } else if (contactsList.length == 1) {
                         // Dans le cas où un seul contact est disponible : le récupérer et vérifier l'email
                         final singleContact = contactsList.first;
@@ -416,30 +416,33 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                                 '')
                             .toString();
                       } else {
-                        // Dans le cas où plusieurs contacts sont disponibles : filtrage par état "Fournisseur"
+                        // Dans le cas où plusieurs contacts sont disponibles : filtrage par type "Contact administratif"
                         final dict = await service.getDictionary();
-                        final contactStates = dict['data']?['setting']?['state']?['contact'] as List? ?? [];
-                        int? supplierStateId;
-                        for (var state in contactStates) {
-                          final label = state['label']?.toString().toLowerCase() ?? '';
-                          if (label.contains('fournisseur')) {
-                            supplierStateId = int.tryParse(state['id']?.toString() ?? '');
+                        final contactTypes = dict['data']?['setting']?['typeOf']?['contact'] as List? ?? [];
+                        int? adminTypeId;
+                        for (var type in contactTypes) {
+                          final val = (type['value'] ?? type['label'] ?? '').toString().toLowerCase();
+                          if (val.contains('administratif')) {
+                            adminTypeId = int.tryParse(type['id']?.toString() ?? '');
                             break;
                           }
                         }
 
-                        final supplierContacts = contactsList.where((c) {
-                          final stateVal = int.tryParse(c['attributes']?['state']?.toString() ?? '');
-                          return stateVal != null && stateVal == supplierStateId;
+                        final adminContacts = contactsList.where((c) {
+                          final typesAttr = c['attributes']?['types'];
+                          final List<String> contactTypesList = typesAttr is List 
+                              ? typesAttr.map((e) => e.toString()).toList() 
+                              : (typesAttr?.toString().split('|') ?? []);
+                          return adminTypeId != null && contactTypesList.contains(adminTypeId.toString());
                         }).toList();
 
-                        if (supplierContacts.isEmpty) {
-                          alertMessage = "Aucun contact avec l'état 'Fournisseur' parmi les contacts trouvés";
-                        } else if (supplierContacts.length > 1) {
-                          alertMessage = "Plusieurs contacts avec l'état 'Fournisseur' détectés.";
+                        if (adminContacts.isEmpty) {
+                          alertMessage = "Aucun contact administratif parmi les contacts trouvés.";
+                        } else if (adminContacts.length > 1) {
+                          alertMessage = "Plusieurs contacts administratifs détectés.";
                         } else {
-                          // Un seul contact a l'état "Fournisseur"
-                          final selectedContact = supplierContacts.first;
+                          // Un seul contact a le type "Contact administratif"
+                          final selectedContact = adminContacts.first;
                           providerContactId = selectedContact['id']?.toString();
                           final cAttr = selectedContact['attributes'] ?? {};
                           contactEmail = (cAttr['email'] ??
@@ -459,9 +462,9 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                   if (providerId == "Aucun" || providerId.isEmpty) {
                     alertMessage = "Aucun fournisseur lié à l'achat de prestation.";
                   } else if (providerContactId == null || providerContactId.isEmpty) {
-                    alertMessage = "Aucun contact administratif renseigné pour le fournisseur";
+                    alertMessage = "Aucun contact renseigné pour le fournisseur.";
                   } else if (contactEmail.isEmpty || !contactEmail.contains('@')) {
-                    alertMessage = "E-mail de contact non renseigné";
+                    alertMessage = "E-mail de contact non renseigné.";
                   }
                 }
               } catch (e) {
@@ -757,7 +760,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
             if (companyIdInt != null) {
               final contactsList = await service.getCompanyContacts(companyIdInt);
               if (contactsList.isEmpty) {
-                alertMessage = "Aucun contact administratif renseigné pour le fournisseur";
+                alertMessage = "Aucun contact renseigné pour le fournisseur.";
               } else if (contactsList.length == 1) {
                 final singleContact = contactsList.first;
                 providerContactId = singleContact['id']?.toString();
@@ -770,27 +773,30 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                     .toString();
               } else {
                 final dict = await service.getDictionary(forceRefresh: true);
-                final contactStates = dict['data']?['setting']?['state']?['contact'] as List? ?? [];
-                int? supplierStateId;
-                for (var state in contactStates) {
-                  final label = state['label']?.toString().toLowerCase() ?? '';
-                  if (label.contains('fournisseur')) {
-                    supplierStateId = int.tryParse(state['id']?.toString() ?? '');
+                final contactTypes = dict['data']?['setting']?['typeOf']?['contact'] as List? ?? [];
+                int? adminTypeId;
+                for (var type in contactTypes) {
+                  final val = (type['value'] ?? type['label'] ?? '').toString().toLowerCase();
+                  if (val.contains('administratif')) {
+                    adminTypeId = int.tryParse(type['id']?.toString() ?? '');
                     break;
                   }
                 }
 
-                final supplierContacts = contactsList.where((c) {
-                  final stateVal = int.tryParse(c['attributes']?['state']?.toString() ?? '');
-                  return stateVal != null && stateVal == supplierStateId;
+                final adminContacts = contactsList.where((c) {
+                  final typesAttr = c['attributes']?['types'];
+                  final List<String> contactTypesList = typesAttr is List 
+                      ? typesAttr.map((e) => e.toString()).toList() 
+                      : (typesAttr?.toString().split('|') ?? []);
+                  return adminTypeId != null && contactTypesList.contains(adminTypeId.toString());
                 }).toList();
 
-                if (supplierContacts.isEmpty) {
-                  alertMessage = "Aucun contact avec l'état 'Fournisseur' parmi les contacts trouvés";
-                } else if (supplierContacts.length > 1) {
-                  alertMessage = "Plusieurs contacts avec l'état 'Fournisseur' détectés.";
+                if (adminContacts.isEmpty) {
+                  alertMessage = "Aucun contact administratif parmi les contacts trouvés.";
+                } else if (adminContacts.length > 1) {
+                  alertMessage = "Plusieurs contacts administratifs détectés.";
                 } else {
-                  final selectedContact = supplierContacts.first;
+                  final selectedContact = adminContacts.first;
                   providerContactId = selectedContact['id']?.toString();
                   final cAttr = selectedContact['attributes'] ?? {};
                   contactEmail = (cAttr['email'] ??
@@ -808,9 +814,9 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
             if (providerId == "Aucun" || providerId.isEmpty) {
               alertMessage = "Aucun fournisseur lié à l'achat de prestation.";
             } else if (providerContactId == null || providerContactId.isEmpty) {
-              alertMessage = "Aucun contact administratif renseigné pour le fournisseur";
+              alertMessage = "Aucun contact renseigné pour le fournisseur.";
             } else if (contactEmail.isEmpty || !contactEmail.contains('@')) {
-              alertMessage = "E-mail de contact non renseigné";
+              alertMessage = "E-mail de contact non renseigné.";
             }
           }
         } else {
@@ -1807,19 +1813,19 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                                                   }
                                                   String targetUrl = "${boondUiUrl}projects/${item.projectId}/deliveries";
                                                   if (item.alertMessage != null) {
-                                                    if (item.alertMessage!.contains("Aucun achat associé à la prestation")) {
+                                                    if (item.alertMessage!.contains("Aucun achat associé à la prestation.")) {
                                                       targetUrl = "${boondUiUrl}deliveries/${item.id}";
-                                                    } else if (item.alertMessage!.contains("Aucun fournisseur lié à l'achat de prestation") &&
+                                                    } else if (item.alertMessage!.contains("Aucun fournisseur lié à l'achat de prestation.") &&
                                                         item.purchaseId != null &&
                                                         item.purchaseId!.isNotEmpty) {
                                                       targetUrl = "${boondUiUrl}purchases/${item.purchaseId}/information";
-                                                    } else if ((item.alertMessage!.contains("Aucun contact administratif renseigné") ||
-                                                                item.alertMessage!.contains("Aucun contact avec l'état 'Fournisseur'") ||
-                                                                item.alertMessage!.contains("Plusieurs contacts avec l'état 'Fournisseur'")) &&
+                                                    } else if ((item.alertMessage!.contains("Aucun contact renseigné pour le fournisseur.") ||
+                                                                item.alertMessage!.contains("Aucun contact administratif parmi les contacts trouvés.") ||
+                                                                item.alertMessage!.contains("Plusieurs contacts administratifs détectés.")) &&
                                                         item.providerId != "Aucun" &&
                                                         item.providerId.isNotEmpty) {
                                                       targetUrl = "${boondUiUrl}companies/${item.providerId}/contacts";
-                                                    } else if (item.alertMessage!.contains("E-mail de contact non renseigné") &&
+                                                    } else if (item.alertMessage!.contains("E-mail de contact non renseigné.") &&
                                                         item.providerContactId != null &&
                                                         item.providerContactId!.isNotEmpty) {
                                                       targetUrl = "${boondUiUrl}contacts/${item.providerContactId}/information";
