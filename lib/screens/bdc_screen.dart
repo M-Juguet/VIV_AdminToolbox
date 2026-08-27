@@ -429,9 +429,33 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                         }
 
                         final adminContacts = contactsList.where((c) {
-                          final typeVal = int.tryParse(c['attributes']?['type']?.toString() ?? '');
-                          return adminTypeId != null && typeVal == adminTypeId;
-                        }).toList();
+                           if (adminTypeId == null) return false;
+                           final typeAttr = c['attributes']?['type'];
+                           final typesAttr = c['attributes']?['types'];
+                           
+                           final List<String> rawValues = [];
+                           if (typeAttr != null) {
+                             if (typeAttr is List) {
+                               rawValues.addAll(typeAttr.map((e) => e.toString()));
+                             } else {
+                               rawValues.addAll(typeAttr.toString().split('|'));
+                             }
+                           }
+                           if (typesAttr != null) {
+                             if (typesAttr is List) {
+                               rawValues.addAll(typesAttr.map((e) => e.toString()));
+                             } else {
+                               rawValues.addAll(typesAttr.toString().split('|'));
+                             }
+                           }
+                           
+                           final cleanValues = rawValues
+                               .map((e) => e.trim())
+                               .where((e) => e.isNotEmpty)
+                               .toList();
+                               
+                           return cleanValues.contains(adminTypeId.toString());
+                         }).toList();
 
                         if (adminContacts.isEmpty) {
                           alertMessage = "Aucun contact administratif parmi les contacts trouvés.";
@@ -781,8 +805,32 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                 }
 
                 final adminContacts = contactsList.where((c) {
-                  final typeVal = int.tryParse(c['attributes']?['type']?.toString() ?? '');
-                  return adminTypeId != null && typeVal == adminTypeId;
+                  if (adminTypeId == null) return false;
+                  final typeAttr = c['attributes']?['type'];
+                  final typesAttr = c['attributes']?['types'];
+                  
+                  final List<String> rawValues = [];
+                  if (typeAttr != null) {
+                    if (typeAttr is List) {
+                      rawValues.addAll(typeAttr.map((e) => e.toString()));
+                    } else {
+                      rawValues.addAll(typeAttr.toString().split('|'));
+                    }
+                  }
+                  if (typesAttr != null) {
+                    if (typesAttr is List) {
+                      rawValues.addAll(typesAttr.map((e) => e.toString()));
+                    } else {
+                      rawValues.addAll(typesAttr.toString().split('|'));
+                    }
+                  }
+                  
+                  final cleanValues = rawValues
+                      .map((e) => e.trim())
+                      .where((e) => e.isNotEmpty)
+                      .toList();
+                      
+                  return cleanValues.contains(adminTypeId.toString());
                 }).toList();
 
                 if (adminContacts.isEmpty) {
