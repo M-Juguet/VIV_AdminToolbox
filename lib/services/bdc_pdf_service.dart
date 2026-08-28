@@ -7,15 +7,16 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:opsis_app/screens/bdc_screen.dart'; // Pour importer BdcPrestaStep2
 import 'package:image/image.dart' as img;
-import 'package:opsis_app/services/bdc_sent_logs_service.dart';
 
 class BdcPdfService {
   /// Génère le PDF d'un bon de commande sous forme d'octets (Uint8List).
   static Future<Uint8List> generateBdcPdf(
-    BdcPrestaStep2 presta,
+    List<BdcPrestaStep2> prestas,
     String periodMonth,
     String periodYear,
   ) async {
+    assert(prestas.isNotEmpty);
+    final firstPresta = prestas.first;
     final pdf = pw.Document();
 
     // Charger les polices locales Noto Sans pour le support Unicode (€ et œ)
@@ -47,19 +48,12 @@ class BdcPdfService {
       boldItalic: boldItalicFont,
     );
 
-    // Récupérer les dates réelles de la prestation
-    final String startDate = presta.startDate;
-    final String endDate = presta.endDate;
-
     // Date du jour pour la signature ("Le $TODAY$")
     final String todayDate = DateFormat('dd/MM/yyyy').format(DateTime.now());
 
-    // Calculer le numéro séquentiel dynamique du BDC pour ce fournisseur et cette année
-    final logsService = BdcSentLogsService();
-    final int existingCount = await logsService.getSentCountForProvider(presta.providerId, periodYear);
-    final String seqStr = (existingCount + 1).toString().padLeft(2, '0');
+    // Calculer le numéro de BDC au format : VIV-PO-CSOC{id}-{YY}{MM}
     final String yearSuffix = periodYear.substring(periodYear.length - 2);
-    final String bdcNumber = "VIV-PO-CSOC${presta.providerId}-$yearSuffix$seqStr";
+    final String bdcNumber = "VIV-PO-CSOC${firstPresta.providerId}-$yearSuffix$periodMonth";
 
     // Charger l'image du logo Viv blanc depuis les assets de manière robuste (CPU-only)
     final logoImage = await _loadRobustImage('assets/images/viv-horizontal-white-sm.png');
@@ -194,7 +188,7 @@ class BdcPdfService {
                                 crossAxisAlignment: pw.CrossAxisAlignment.start,
                                 children: [
                                   pw.Text(
-                                    "Réf. Contrat fournisseur : $periodYear-CSOC${presta.providerId}",
+                                    "Réf. Contrat fournisseur : $periodYear-CSOC${firstPresta.providerId}",
                                     style: pw.TextStyle(
                                       fontWeight: pw.FontWeight.bold,
                                       fontSize: 10,
@@ -202,10 +196,10 @@ class BdcPdfService {
                                     ),
                                   ),
                                   pw.SizedBox(height: 6),
-                                  pw.Text(presta.providerName, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9)),
-                                  pw.Text(presta.providerAddress, style: pw.TextStyle(fontSize: 9)),
-                                  pw.Text("${presta.providerPostcode} ${presta.providerTown}", style: pw.TextStyle(fontSize: 9)),
-                                  pw.Text(presta.providerCountry, style: pw.TextStyle(fontSize: 9)),
+                                  pw.Text(firstPresta.providerName, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9)),
+                                  pw.Text(firstPresta.providerAddress, style: pw.TextStyle(fontSize: 9)),
+                                  pw.Text("${firstPresta.providerPostcode} ${firstPresta.providerTown}", style: pw.TextStyle(fontSize: 9)),
+                                  pw.Text(firstPresta.providerCountry, style: pw.TextStyle(fontSize: 9)),
                                 ],
                               ),
                             ),
@@ -258,19 +252,19 @@ class BdcPdfService {
                               _buildTableHeaderCell("Prix Unit. HT EUR"),
                             ],
                           ),
-                          // Ligne de contenu
-                          pw.TableRow(
+                          // Lignes de contenu consolidées
+                          ...prestas.map((presta) => pw.TableRow(
                             children: [
                               _buildTableCell(
                                 presta.prestationRef,
                                 subtitle: presta.prestationTitle.replaceAll(RegExp(r'^MIS\d+\s*-\s*'), ''),
                               ),
-                              _buildTableCell(startDate, alignCenter: true),
-                              _buildTableCell(endDate, alignCenter: true),
+                              _buildTableCell(presta.startDate, alignCenter: true),
+                              _buildTableCell(presta.endDate, alignCenter: true),
                               _buildTableCell("UO", alignCenter: true),
                               _buildTableCell("${presta.tjm.toStringAsFixed(2)} €", alignRight: true),
                             ],
-                          ),
+                          )),
                         ],
                       ),
                       pw.SizedBox(height: 16),
@@ -291,7 +285,7 @@ class BdcPdfService {
                                     style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
                                   ),
                                   pw.Text(
-                                    presta.uoCount.toStringAsFixed(2),
+                                    prestas.fold<double>(0, (sum, p) => sum + p.uoCount).toStringAsFixed(2),
                                     style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
                                   ),
                                 ],
@@ -305,7 +299,7 @@ class BdcPdfService {
                                     style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
                                   ),
                                   pw.Text(
-                                    "${presta.totalHt.toStringAsFixed(2)} €",
+                                    "${prestas.fold<double>(0, (sum, p) => sum + p.totalHt).toStringAsFixed(2)} €",
                                     style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
                                   ),
                                 ],

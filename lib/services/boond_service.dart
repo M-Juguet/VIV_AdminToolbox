@@ -155,6 +155,26 @@ class BoondService {
   }
 
   /// Récupère les prestations (deliveries) associées à un projet avec cache de 24h
+  /// Récupère une prestation spécifique par son ID avec cache de 24h
+  Future<Map<String, dynamic>> getDelivery(int id, {bool forceRefresh = false}) async {
+    final cacheKey = 'delivery_$id';
+    final cache = BoondCacheService();
+    if (!forceRefresh) {
+      final cachedData = await cache.get(cacheKey, ttl: const Duration(hours: 24));
+      if (cachedData != null) {
+        return Map<String, dynamic>.from(cachedData);
+      }
+    }
+    try {
+      final response = await _dio.get('deliveries/$id');
+      final data = response.data as Map<String, dynamic>;
+      await cache.put(cacheKey, data);
+      return data;
+    } catch (e) {
+      throw e.toString();
+    }
+  }
+
   Future<List<dynamic>> getDeliveries(int projectId, {bool forceRefresh = false}) async {
     final cacheKey = 'deliveries_$projectId';
     final cache = BoondCacheService();

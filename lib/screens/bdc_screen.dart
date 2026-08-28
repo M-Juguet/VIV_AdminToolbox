@@ -134,8 +134,8 @@ class BdcPrestaStep2 {
 }
 
 class BdcMailStatus {
-  final String id;
-  final String consultantName;
+  final String id; // L'ID du fournisseur (providerId)
+  final String consultantName; // Concaténation des consultants pour affichage
   final String providerName;
   final String email;
   String status; // 'pending', 'generating', 'sending', 'success', 'failed'
@@ -178,6 +178,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
 
   // Mémorisation de détection par période
   final Map<String, bool> _periodDetectionStatus = {};
+  final Map<String, bool> _expandedProviders = {};
 
   String get _currentPeriodKey => "${_selectedMonth}_$_selectedYear";
   bool get _isCurrentPeriodDetected => _periodDetectionStatus[_currentPeriodKey] ?? false;
@@ -225,6 +226,13 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
   // --- ACTIONS DU FLUX ---
 
   void _runDetection() async {
+    // Réinitialiser le fichier de log de debug
+    try {
+      final logFile = File(r'C:\Users\stati\.gemini\antigravity\brain\2d366e5c-3537-42cd-8cc7-7570a907bd0c\debug_cjm.txt');
+      if (logFile.existsSync()) logFile.deleteSync();
+      logFile.writeAsStringSync("=== DEBUG LOG CJM ===\n");
+    } catch (_) {}
+
     setState(() {
       _isLoadingDetection = true;
     });
@@ -257,6 +265,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
       final response = await service.getProjectsWithInclusions(
         filters: {'states[]': 1}, // Projets actifs
         inclusions: ['company'],
+        forceRefresh: true,
       );
       final projects = response['data'] as List? ?? [];
       final included = response['included'] as List? ?? [];
@@ -284,7 +293,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
         final clientName = companyNames[clientId] ?? 'Client inconnu';
 
         // Récupérer les prestations du projet
-        final List<dynamic> deliveries = await service.getDeliveries(projectId);
+        final List<dynamic> deliveries = await service.getDeliveries(projectId, forceRefresh: true);
         
         final monthInt = int.tryParse(_selectedMonth) ?? DateTime.now().month;
         final yearInt = int.tryParse(_selectedYear) ?? DateTime.now().year;
@@ -294,6 +303,17 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
         for (var delivery in deliveries) {
           final delId = delivery['id']?.toString() ?? '';
           final delAttr = delivery['attributes'] ?? {};
+      
+
+          
+          // Récupérer le détail de la prestation pour avoir le averageDailyCost
+          Map<String, dynamic> deliveryDetail = {};
+          Map<String, dynamic> deliveryDetailAttr = {};
+          try {
+            final delIdInt = int.parse(delId);
+            deliveryDetail = await service.getDelivery(delIdInt, forceRefresh: true);
+            deliveryDetailAttr = deliveryDetail['data']?['attributes'] ?? {};
+          } catch (_) {}
           final delTitle = delAttr['title']?.toString() ?? 'Prestation sans titre';
           
           if (delTitle.toLowerCase().contains('shift')) {
@@ -361,6 +381,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
           String? providerContactId;
           String? purchaseIdStr;
 
+          double purchaseTjm = 0;
           if (purchaseRel == null) {
             alertMessage = "Aucun achat associé à la prestation.";
           } else {
@@ -369,7 +390,9 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
             if (purchaseId != null) {
               try {
                 // Récupère l'achat avec inclusions de la société fournisseur et du contact fournisseur
-                final pResponse = await service.getPurchaseWithInclusions(purchaseId);
+                final pResponse = await service.getPurchaseWithInclusions(purchaseId, forceRefresh: true);
+                final pAttr = pResponse['data']?['attributes'] ?? {};
+                purchaseTjm = double.tryParse(pAttr['averageDailyCost']?.toString() ?? '0') ?? 0;
                 final pIncluded = pResponse['included'] as List? ?? [];
                 
                 // 1. Trouver l'entité Société (Company) dans included
@@ -549,12 +572,32 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
           final String displayStartDate = "${finalStartDate.day.toString().padLeft(2, '0')}/${finalStartDate.month.toString().padLeft(2, '0')}/${finalStartDate.year}";
           final String displayEndDate = "${finalEndDate.day.toString().padLeft(2, '0')}/${finalEndDate.month.toString().padLeft(2, '0')}/${finalEndDate.year}";
 
+          // Écriture du debug log
+          try {
+            final logFile = File(r'C:\Users\stati\.gemini\antigravity\brain\2d366e5c-3537-42cd-8cc7-7570a907bd0c\debug_cjm.txt');
+            logFile.writeAsStringSync(
+              "DETECTION - ID: $delId, Title: $delTitle, contractAverageDailyCost: ${delAttr['contractAverageDailyCost']} (Type: ${delAttr['contractAverageDailyCost']?.runtimeType}), costsSimulatedExcludingTax: ${delAttr['costsSimulatedExcludingTax']}\n",
+              mode: FileMode.append,
+            );
+          } catch (_) {}
+
           // Extraire la quantité vendue et calculer le TJM d'achat
+          double averageDailyCost = _parseTjm(deliveryDetailAttr['averageDailyCost']);
+          if (averageDailyCost == 0) {
+            averageDailyCost = _parseTjm(deliveryDetailAttr['contractAverageDailyCost']);
+          }
+          if (averageDailyCost == 0) {
+            averageDailyCost = _parseTjm(delAttr['contractAverageDailyCost']);
+          }
+          if (averageDailyCost == 0) {
+            averageDailyCost = purchaseTjm;
+          }
           final double quantitySold = double.tryParse(delAttr['numberOfDaysInvoicedOrQuantity']?.toString() ?? '0') ?? 0;
-          final double costsSimulated = double.tryParse(delAttr['costsSimulatedExcludingTax']?.toString() ?? '0') ?? 0;
-          double averageDailyCost = 0;
-          if (quantitySold > 0) {
-            averageDailyCost = costsSimulated / quantitySold;
+          if (averageDailyCost == 0) {
+            final double costsSimulated = double.tryParse(delAttr['costsSimulatedExcludingTax']?.toString() ?? '0') ?? 0;
+            if (quantitySold > 0) {
+              averageDailyCost = costsSimulated / quantitySold;
+            }
           }
 
            final candidate = BdcPrestaStep1(
@@ -654,6 +697,16 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
       }
 
       final delAttr = delivery['attributes'] ?? {};
+      
+      // Récupérer le détail de la prestation pour avoir le averageDailyCost
+      Map<String, dynamic> deliveryDetail = {};
+      Map<String, dynamic> deliveryDetailAttr = {};
+      try {
+        final delIdInt = int.parse(deliveryId);
+        deliveryDetail = await service.getDelivery(delIdInt, forceRefresh: true);
+        deliveryDetailAttr = deliveryDetail['data']?['attributes'] ?? {};
+      } catch (_) {}
+      
       final delTitle = delAttr['title']?.toString() ?? 'Prestation sans titre';
 
       // 1. Règle d'exclusion "shift"
@@ -743,6 +796,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
       String providerTown = "";
       String providerCountry = "";
 
+      double purchaseTjm = 0;
       if (purchaseRel == null) {
         alertMessage = "Aucun Achat associé à la prestation.";
       } else {
@@ -750,6 +804,8 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
         purchaseIdStr = purchaseId?.toString();
         if (purchaseId != null) {
           final pResponse = await service.getPurchaseWithInclusions(purchaseId, forceRefresh: true);
+          final pAttr = pResponse['data']?['attributes'] ?? {};
+          purchaseTjm = double.tryParse(pAttr['averageDailyCost']?.toString() ?? '0') ?? 0;
           final pIncluded = pResponse['included'] as List? ?? [];
           
           final compObj = pIncluded.firstWhere(
@@ -886,12 +942,32 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
         }
       }
 
+      // Écriture du debug log
+      try {
+        final logFile = File(r'C:\Users\stati\.gemini\antigravity\brain\2d366e5c-3537-42cd-8cc7-7570a907bd0c\debug_cjm.txt');
+        logFile.writeAsStringSync(
+          "REFRESH - ID: $deliveryId, Title: $delTitle, contractAverageDailyCost: ${delAttr['contractAverageDailyCost']} (Type: ${delAttr['contractAverageDailyCost']?.runtimeType}), costsSimulatedExcludingTax: ${delAttr['costsSimulatedExcludingTax']}\n",
+          mode: FileMode.append,
+        );
+      } catch (_) {}
+
       // Extraire la quantité vendue et le TJM d'achat
+      double averageDailyCost = _parseTjm(deliveryDetailAttr['averageDailyCost']);
+      if (averageDailyCost == 0) {
+        averageDailyCost = _parseTjm(deliveryDetailAttr['contractAverageDailyCost']);
+      }
+      if (averageDailyCost == 0) {
+        averageDailyCost = _parseTjm(delAttr['contractAverageDailyCost']);
+      }
+      if (averageDailyCost == 0) {
+        averageDailyCost = purchaseTjm;
+      }
       final double quantitySold = double.tryParse(delAttr['numberOfDaysInvoicedOrQuantity']?.toString() ?? '0') ?? 0;
-      final double costsSimulated = double.tryParse(delAttr['costsSimulatedExcludingTax']?.toString() ?? '0') ?? 0;
-      double averageDailyCost = 0;
-      if (quantitySold > 0) {
-        averageDailyCost = costsSimulated / quantitySold;
+      if (averageDailyCost == 0) {
+        final double costsSimulated = double.tryParse(delAttr['costsSimulatedExcludingTax']?.toString() ?? '0') ?? 0;
+        if (quantitySold > 0) {
+          averageDailyCost = costsSimulated / quantitySold;
+        }
       }
 
       // Extraire les dates réelles
@@ -1122,12 +1198,23 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
 
   void _prepareSmtp() {
     final List<BdcMailStatus> smtpList = [];
+    final Map<String, List<BdcPrestaStep2>> groups = {};
     for (var c in _step2Calculated) {
-      final orig = _step1Candidates.firstWhere((x) => x.id == c.id);
+      groups.putIfAbsent(c.providerId, () => []).add(c);
+    }
+    
+    for (var entry in groups.entries) {
+      final providerId = entry.key;
+      final prestas = entry.value;
+      final firstPresta = prestas.first;
+      final orig = _step1Candidates.firstWhere((x) => x.providerId == providerId);
+      
+      final consultantNames = prestas.map((x) => x.consultantName).toList();
+      
       smtpList.add(BdcMailStatus(
-        id: c.id,
-        consultantName: c.consultantName,
-        providerName: orig.providerName,
+        id: providerId,
+        consultantName: consultantNames.join(', '),
+        providerName: firstPresta.providerName,
         email: orig.providerEmail.isNotEmpty ? orig.providerEmail : "fournisseurs@viv-prod.com",
         status: 'pending',
       ));
@@ -1165,8 +1252,9 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
     }
 
     final item = _smtpStatusList[index];
-    final step2Item = _step2Calculated.firstWhere((x) => x.id == item.id);
-    final step1Item = _step1Candidates.firstWhere((x) => x.id == item.id);
+    final providerId = item.id;
+    final providerPrestas = _step2Calculated.where((x) => x.providerId == providerId).toList();
+    final step1Item = _step1Candidates.firstWhere((x) => x.providerId == providerId);
 
     // Étape 1 : Génération du PDF
     setState(() {
@@ -1178,7 +1266,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
       
       Uint8List? pdfBytes;
       try {
-        pdfBytes = await BdcPdfService.generateBdcPdf(step2Item, _selectedMonth, _selectedYear);
+        pdfBytes = await BdcPdfService.generateBdcPdf(providerPrestas, _selectedMonth, _selectedYear);
       } catch (e) {
         setState(() {
           item.status = 'failed';
@@ -1198,20 +1286,56 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
         
         try {
           final tempDir = await getTemporaryDirectory();
-          final tempFile = File(p.join(tempDir.path, "temp_${step1Item.providerId}.pdf"));
+          final tempFile = File(p.join(tempDir.path, "BDC_CSOC${providerId}_$_selectedYear$_selectedMonth.pdf"));
           await tempFile.writeAsBytes(pdfBytes!);
 
           final settings = ref.read(settingsProvider);
           final emailService = ref.read(emailServiceProvider);
+          final service = ref.read(boondServiceProvider);
           final period = '$_selectedMonth/$_selectedYear';
           final logsService = BdcSentLogsService();
+          
+          final monthsFrench = {
+            '01': 'Janvier', '02': 'Février', '03': 'Mars', '04': 'Avril',
+            '05': 'Mai', '06': 'Juin', '07': 'Juillet', '08': 'Août',
+            '09': 'Septembre', '10': 'Octobre', '11': 'Novembre', '12': 'Décembre'
+          };
+          final monthLabel = monthsFrench[_selectedMonth] ?? 'Mois';
+          
+          String contactFirstName = "Madame, Monsieur";
+          try {
+            final cList = await service.getCompanyContacts(int.parse(providerId));
+            final match = cList.firstWhere((x) => x['id']?.toString() == step1Item.providerContactId, orElse: () => null);
+            if (match != null) {
+              contactFirstName = match['attributes']?['firstName'] ?? 'Madame, Monsieur';
+            }
+          } catch (_) {}
+
+          final String bdcNumber = "VIV-PO-CSOC$providerId-${_selectedYear.substring(_selectedYear.length - 2)}$_selectedMonth";
+          final consultantNamesList = providerPrestas.map((x) => x.consultantName).join(', ');
 
           // 1. Envoyer le mail avec pièce jointe
           await emailService.sendEmail(
             settings: settings,
             to: item.email,
-            subject: "Bon de Commande Opsis - Période $period - ${step2Item.consultantName}",
-            body: "Bonjour,\n\nVeuillez trouver ci-joint le bon de commande pour la prestation de ${step2Item.consultantName} sur la période de $period.\n\nCordialement,\nL'administrateur Opsis.",
+            subject: "Votre bon de commande_$monthLabel $_selectedYear",
+            body: "Bonjour $contactFirstName,\n\n"
+                  "Conformément au contrat de prestation qui nous lie, vous trouverez en pièce jointe le bon de commande $bdcNumber.\n\n"
+                  "Pour rappel, notre processus de facturation se déroule comme suit :\n\n"
+                  "1 - Bon de commande\n"
+                  "En début de chaque mois, nous vous adressons un bon de commande précisant le montant prévisionnel des prestations à réaliser pour le mois concerné, à nous retourner signé.\n\n"
+                  "2 - Rapport de production\n"
+                  "Une fois votre feuille de temps validée dans BOOND, vous recevez un rapport de production indiquant le montant réel des prestations effectuées sur le mois.\n\n"
+                  "3 - Dépôt de votre facture\n"
+                  "Vous pouvez ensuite déposer votre facture directement dans votre espace BOOND, via l’onglet « Mes factures ».\n"
+                  "Lors du dépôt, merci de veiller à renseigner correctement, dans la section « Informations générales », les dates de début et de fin de la période facturée.\n\n\n"
+                  "Conditions de règlement :\n"
+                  "Pour bénéficier d’un règlement à 40 jours, votre facture doit être déposée avant le 25 du mois suivant la période facturée (M+1). À défaut, le règlement sera automatiquement reporté de 30 jours supplémentaires.\n"
+                  "Echéance de paiement : règlement à 30 jours, le 10 du mois suivant (M+2).\n\n"
+                  "Nous restons à votre disposition pour toute question ou complément d’information.\n"
+                  "Merci par avance pour votre retour.\n\n"
+                  "Cordialement,\n\n"
+                  "L'équipe Opsis",
             attachments: [tempFile],
             bcc: [settings.smtpUser], // Copie conforme à l'expéditeur
           );
@@ -1222,30 +1346,28 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
           } catch (_) {}
 
           // 2. Sauvegarder dans Sembast + disque physique local
-          final int existingCount = await logsService.getSentCountForProvider(step1Item.providerId, _selectedYear);
-          final String seqStr = (existingCount + 1).toString().padLeft(2, '0');
-          final String yearSuffix = _selectedYear.substring(_selectedYear.length - 2);
-          final String bdcNumber = "VIV-PO-CSOC${step1Item.providerId}-$yearSuffix$seqStr";
-
           await logsService.logSentBdc(
-            providerId: step1Item.providerId,
-            consultantName: step2Item.consultantName,
-            clientName: step2Item.clientName,
-            projectName: step2Item.projectName,
-            prestationTitle: step2Item.prestationTitle,
+            providerId: providerId,
+            consultantName: consultantNamesList,
+            clientName: providerPrestas.map((x) => x.clientName).toSet().join(', '),
+            projectName: providerPrestas.map((x) => x.projectName).toSet().join(', '),
+            prestationTitle: providerPrestas.map((x) => x.prestationTitle).toSet().join(', '),
             period: period,
             sentToEmail: item.email,
             bdcNumber: bdcNumber,
-            uoCount: step2Item.uoCount.toDouble(),
-            totalHt: step2Item.totalHt,
+            uoCount: providerPrestas.fold<double>(0, (sum, p) => sum + p.uoCount),
+            totalHt: providerPrestas.fold<double>(0, (sum, p) => sum + p.totalHt),
             pdfBytes: pdfBytes,
           );
 
           // Mettre à jour immédiatement en mémoire pour que la phase 1 soit à jour
-          step1Item.isAlreadySent = true;
-          final now = DateTime.now();
-          step1Item.sentDate = "${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year}";
-          step1Item.isSelected = false;
+          final step1Items = _step1Candidates.where((x) => x.providerId == providerId).toList();
+          for (var s1Item in step1Items) {
+            s1Item.isAlreadySent = true;
+            final now = DateTime.now();
+            s1Item.sentDate = "${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year}";
+            s1Item.isSelected = false;
+          }
 
           setState(() {
             item.status = 'success';
@@ -1271,6 +1393,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
     final period = '$_selectedMonth/$_selectedYear';
     final settings = ref.read(settingsProvider);
     final emailService = ref.read(emailServiceProvider);
+    final service = ref.read(boondServiceProvider);
 
     for (var item in _smtpStatusList) {
       if (item.status == 'failed') {
@@ -1280,27 +1403,63 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
         
         await Future.delayed(const Duration(milliseconds: 300));
         
-        final step2Item = _step2Calculated.firstWhere((x) => x.id == item.id);
-        final step1Item = _step1Candidates.firstWhere((x) => x.id == item.id);
+        final providerId = item.id;
+        final providerPrestas = _step2Calculated.where((x) => x.providerId == providerId).toList();
+        final step1Item = _step1Candidates.firstWhere((x) => x.providerId == providerId);
         
         Uint8List? pdfBytes;
         try {
-          pdfBytes = await BdcPdfService.generateBdcPdf(step2Item, _selectedMonth, _selectedYear);
+          pdfBytes = await BdcPdfService.generateBdcPdf(providerPrestas, _selectedMonth, _selectedYear);
           
           setState(() {
             item.status = 'sending';
           });
           
           final tempDir = await getTemporaryDirectory();
-          final tempFile = File(p.join(tempDir.path, "temp_retry_${step1Item.providerId}.pdf"));
+          final tempFile = File(p.join(tempDir.path, "BDC_CSOC${providerId}_$_selectedYear$_selectedMonth.pdf"));
           await tempFile.writeAsBytes(pdfBytes);
+
+          final monthsFrench = {
+            '01': 'Janvier', '02': 'Février', '03': 'Mars', '04': 'Avril',
+            '05': 'Mai', '06': 'Juin', '07': 'Juillet', '08': 'Août',
+            '09': 'Septembre', '10': 'Octobre', '11': 'Novembre', '12': 'Décembre'
+          };
+          final monthLabel = monthsFrench[_selectedMonth] ?? 'Mois';
+          
+          String contactFirstName = "Madame, Monsieur";
+          try {
+            final cList = await service.getCompanyContacts(int.parse(providerId));
+            final match = cList.firstWhere((x) => x['id']?.toString() == step1Item.providerContactId, orElse: () => null);
+            if (match != null) {
+              contactFirstName = match['attributes']?['firstName'] ?? 'Madame, Monsieur';
+            }
+          } catch (_) {}
+
+          final String bdcNumber = "VIV-PO-CSOC$providerId-${_selectedYear.substring(_selectedYear.length - 2)}$_selectedMonth";
+          final consultantNamesList = providerPrestas.map((x) => x.consultantName).join(', ');
 
           // 1. Envoyer le mail réel
           await emailService.sendEmail(
             settings: settings,
             to: item.email,
-            subject: "Bon de Commande Opsis - Période $period - ${step2Item.consultantName}",
-            body: "Bonjour,\n\nVeuillez trouver ci-joint le bon de commande pour la prestation de ${step2Item.consultantName} sur la période de $period.\n\nCordialement,\nL'administrateur Opsis.",
+            subject: "Votre bon de commande_$monthLabel $_selectedYear",
+            body: "Bonjour $contactFirstName,\n\n"
+                  "Conformément au contrat de prestation qui nous lie, vous trouverez en pièce jointe le bon de commande $bdcNumber.\n\n"
+                  "Pour rappel, notre processus de facturation se déroule comme suit :\n\n"
+                  "1 - Bon de commande\n"
+                  "En début de chaque mois, nous vous adressons un bon de commande précisant le montant prévisionnel des prestations à réaliser pour le mois concerné, à nous retourner signé.\n\n"
+                  "2 - Rapport de production\n"
+                  "Une fois votre feuille de temps validée dans BOOND, vous recevez un rapport de production indiquant le montant réel des prestations effectuées sur le mois.\n\n"
+                  "3 - Dépôt de votre facture\n"
+                  "Vous pouvez ensuite déposer votre facture directement dans votre espace BOOND, via l’onglet « Mes factures ».\n"
+                  "Lors du dépôt, merci de veiller à renseigner correctement, dans la section « Informations générales », les dates de début et de fin de la période facturée.\n\n\n"
+                  "Conditions de règlement :\n"
+                  "Pour bénéficier d’un règlement à 40 jours, votre facture doit être déposée avant le 25 du mois suivant la période facturée (M+1). À défaut, le règlement sera automatiquement reporté de 30 jours supplémentaires.\n"
+                  "Echéance de paiement : règlement à 30 jours, le 10 du mois suivant (M+2).\n\n"
+                  "Nous restons à votre disposition pour toute question ou complément d’information.\n"
+                  "Merci par avance pour votre retour.\n\n"
+                  "Cordialement,\n\n"
+                  "L'équipe Opsis",
             attachments: [tempFile],
             bcc: [settings.smtpUser], // Copie conforme à l'expéditeur
           );
@@ -1311,30 +1470,28 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
           } catch (_) {}
 
           // 2. Sauvegarder dans Sembast + disque physique local
-          final int existingCount = await logsService.getSentCountForProvider(step1Item.providerId, _selectedYear);
-          final String seqStr = (existingCount + 1).toString().padLeft(2, '0');
-          final String yearSuffix = _selectedYear.substring(_selectedYear.length - 2);
-          final String bdcNumber = "VIV-PO-CSOC${step1Item.providerId}-$yearSuffix$seqStr";
-
           await logsService.logSentBdc(
-            providerId: step1Item.providerId,
-            consultantName: step2Item.consultantName,
-            clientName: step2Item.clientName,
-            projectName: step2Item.projectName,
-            prestationTitle: step2Item.prestationTitle,
+            providerId: providerId,
+            consultantName: consultantNamesList,
+            clientName: providerPrestas.map((x) => x.clientName).toSet().join(', '),
+            projectName: providerPrestas.map((x) => x.projectName).toSet().join(', '),
+            prestationTitle: providerPrestas.map((x) => x.prestationTitle).toSet().join(', '),
             period: period,
             sentToEmail: item.email,
             bdcNumber: bdcNumber,
-            uoCount: step2Item.uoCount.toDouble(),
-            totalHt: step2Item.totalHt,
+            uoCount: providerPrestas.fold<double>(0, (sum, p) => sum + p.uoCount),
+            totalHt: providerPrestas.fold<double>(0, (sum, p) => sum + p.totalHt),
             pdfBytes: pdfBytes,
           );
 
           // Mettre à jour immédiatement en mémoire pour que la phase 1 soit à jour
-          step1Item.isAlreadySent = true;
-          final now = DateTime.now();
-          step1Item.sentDate = "${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year}";
-          step1Item.isSelected = false;
+          final step1Items = _step1Candidates.where((x) => x.providerId == providerId).toList();
+          for (var s1Item in step1Items) {
+            s1Item.isAlreadySent = true;
+            final now = DateTime.now();
+            s1Item.sentDate = "${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year}";
+            s1Item.isSelected = false;
+          }
 
           setState(() {
             item.status = 'success';
@@ -1662,6 +1819,17 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
       return matchesSearch && matchesClient && matchesProject;
     }).toList();
 
+    // Regrouper par fournisseur
+    final Map<String, List<BdcPrestaStep1>> groupsMap = {};
+    for (var item in filteredList) {
+      groupsMap.putIfAbsent(item.providerId, () => []).add(item);
+    }
+    
+    final providerGroups = groupsMap.entries.map((e) {
+      final providerName = e.value.first.providerName;
+      return _ProviderGroup(providerId: e.key, providerName: providerName, items: e.value);
+    }).toList()..sort((a, b) => a.providerName.toLowerCase().compareTo(b.providerName.toLowerCase()));
+
     final selectedCount = filteredList.where((c) => c.isSelected).length;
 
     return Column(
@@ -1766,77 +1934,137 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                 ),
                 const Divider(height: 1, color: VivColors.gray200),
                 Expanded(
-                  child: filteredList.isEmpty
+                  child: providerGroups.isEmpty
                       ? const Center(
                           child: Text(
                             "Aucune ressource ne correspond aux filtres de recherche.",
                             style: TextStyle(color: VivColors.gray400, fontSize: 13),
                           ),
                         )
-                      : ListView.separated(
-                          itemCount: filteredList.length,
-                          separatorBuilder: (c, i) => const Divider(height: 1, color: VivColors.gray200),
-                          itemBuilder: (context, index) {
-                            final item = filteredList[index];
-                            final hasAlert = item.alertMessage != null;
+                      : ListView.builder(
+                          itemCount: providerGroups.length,
+                          itemBuilder: (context, groupIndex) {
+                            final group = providerGroups[groupIndex];
+                            final isExpanded = _expandedProviders[group.providerId] ?? true;
+                            
+                            final validItems = group.items.where((x) => x.alertMessage == null && !x.isAlreadySent).toList();
+                            final bool? checkboxValue = validItems.isEmpty 
+                                ? false 
+                                : (validItems.every((x) => x.isSelected) 
+                                    ? true 
+                                    : (validItems.any((x) => x.isSelected) ? null : false));
 
-                            return Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                              color: item.isSelected ? Colors.white : Colors.grey.shade50.withAlpha((0.5 * 255).round()),
-                              child: Row(
-                                children: [
-                                  if (hasAlert)
-                                    const SizedBox(width: 44)
-                                  else ...[
-                                    Checkbox(
-                                      value: item.isSelected,
-                                      activeColor: Colors.black,
-                                      onChanged: (val) {
-                                        setState(() {
-                                          item.isSelected = val ?? false;
-                                        });
-                                      },
-                                    ),
-                                    const SizedBox(width: 12),
-                                  ],
-                                  Expanded(
-                                    flex: 3,
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(item.consultantName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                                        const SizedBox(height: 2),
-                                        Text(item.title, style: const TextStyle(fontSize: 12, color: VivColors.gray400)),
-                                      ],
-                                    ),
-                                  ),
-                                  Expanded(
-                                    flex: 3,
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(item.clientName, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                                        const SizedBox(height: 2),
-                                        Text("${item.projectRef} - ${item.projectName}", style: const TextStyle(fontSize: 11, color: VivColors.gray400)),
-                                      ],
-                                    ),
-                                  ),
-                                  Expanded(
-                                    flex: 3,
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(item.providerName, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                                        const SizedBox(height: 2),
-                                        Text(
-                                          (item.providerId == "Aucun" || item.providerId.isEmpty)
-                                              ? "-"
-                                              : "CSOC${item.providerId}",
-                                          style: const TextStyle(fontSize: 11, color: VivColors.gray400),
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Container(
+                                  color: Colors.grey.shade100,
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                  child: Row(
+                                    children: [
+                                      IconButton(
+                                        icon: Icon(isExpanded ? LucideIcons.chevronDown : LucideIcons.chevronRight, size: 18),
+                                        onPressed: () {
+                                          setState(() {
+                                            _expandedProviders[group.providerId] = !isExpanded;
+                                          });
+                                        },
+                                        padding: EdgeInsets.zero,
+                                        constraints: const BoxConstraints(),
+                                        style: IconButton.styleFrom(
+                                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                                         ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      if (validItems.isNotEmpty) ...[
+                                        Checkbox(
+                                          value: checkboxValue,
+                                          tristate: true,
+                                          activeColor: Colors.black,
+                                          onChanged: (val) {
+                                            setState(() {
+                                              final targetVal = val ?? true;
+                                              for (var item in validItems) {
+                                                item.isSelected = targetVal;
+                                              }
+                                            });
+                                          },
+                                        ),
+                                        const SizedBox(width: 8),
+                                      ] else ...[
+                                        const SizedBox(width: 32),
                                       ],
-                                    ),
+                                      Expanded(
+                                        child: Text(
+                                          group.providerName.toUpperCase(),
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 12,
+                                            color: VivColors.gray500,
+                                            letterSpacing: 0.5,
+                                          ),
+                                        ),
+                                      ),
+                                      Text(
+                                        "${validItems.where((x) => x.isSelected).length}/${group.items.length} sélectionnés",
+                                        style: const TextStyle(fontSize: 11, color: VivColors.gray400),
+                                      ),
+                                    ],
                                   ),
+                                ),
+                                const Divider(height: 1, color: VivColors.gray200),
+                                if (isExpanded)
+                                  ListView.separated(
+                                    shrinkWrap: true,
+                                    physics: const NeverScrollableScrollPhysics(),
+                                    itemCount: group.items.length,
+                                    separatorBuilder: (c, i) => const Divider(height: 1, color: VivColors.gray200),
+                                    itemBuilder: (context, itemIndex) {
+                                      final item = group.items[itemIndex];
+                                      final hasAlert = item.alertMessage != null;
+
+                                      return Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                        color: item.isSelected ? Colors.white : Colors.grey.shade50.withAlpha((0.5 * 255).round()),
+                                        child: Row(
+                                          children: [
+                                            const SizedBox(width: 16),
+                                            if (hasAlert || item.isAlreadySent)
+                                              const SizedBox(width: 44)
+                                            else ...[
+                                              Checkbox(
+                                                value: item.isSelected,
+                                                activeColor: Colors.black,
+                                                onChanged: (val) {
+                                                  setState(() {
+                                                    item.isSelected = val ?? false;
+                                                  });
+                                                },
+                                              ),
+                                              const SizedBox(width: 12),
+                                            ],
+                                            Expanded(
+                                              flex: 3,
+                                              child: Column(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(item.consultantName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                                                  const SizedBox(height: 2),
+                                                  Text(item.title, style: const TextStyle(fontSize: 12, color: VivColors.gray400)),
+                                                ],
+                                              ),
+                                            ),
+                                            Expanded(
+                                              flex: 3,
+                                              child: Column(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(item.clientName, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                                                  const SizedBox(height: 2),
+                                                  Text("${item.projectRef} - ${item.projectName}", style: const TextStyle(fontSize: 11, color: VivColors.gray400)),
+                                                ],
+                                              ),
+                                            ),
                                   Expanded(
                                     flex: 4,
                                     child: hasAlert
@@ -1963,8 +2191,12 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                                                 ],
                                               ),
                                   ),
-                                ],
-                              ),
+                                          ],
+                                        ),
+                                      );
+                                    },
+                                  ),
+                              ],
                             );
                           },
                         ),
@@ -1982,7 +2214,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                 const Icon(LucideIcons.signature, size: 16, color: VivColors.gray500),
                 const SizedBox(width: 8),
                 Text(
-                  "$selectedCount bons de commande à générer",
+                  "$selectedCount prestations à générer dans ${providerGroups.where((g) => g.items.any((x) => x.isSelected)).length} BDC",
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VivColors.gray500),
                 ),
               ],
@@ -2008,6 +2240,17 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
 
   Widget _buildStep2Widget() {
     final totalAmount = _step2Calculated.fold<double>(0, (sum, item) => sum + item.totalHt);
+
+    // Regrouper par fournisseur
+    final Map<String, List<BdcPrestaStep2>> groupsMap = {};
+    for (var item in _step2Calculated) {
+      groupsMap.putIfAbsent(item.providerId, () => []).add(item);
+    }
+    
+    final providerGroups = groupsMap.entries.map((e) {
+      final providerName = e.value.first.providerName;
+      return _ProviderGroupStep2(providerId: e.key, providerName: providerName, items: e.value);
+    }).toList()..sort((a, b) => a.providerName.toLowerCase().compareTo(b.providerName.toLowerCase()));
 
     return Column(
       children: [
@@ -2044,90 +2287,157 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
               borderRadius: BorderRadius.circular(VivSpacing.radiusLg),
               border: Border.all(color: VivColors.gray200),
             ),
-            child: ListView.separated(
-              itemCount: _step2Calculated.length,
-              separatorBuilder: (c, i) => const Divider(height: 1, color: VivColors.gray200),
-              itemBuilder: (context, index) {
-                final item = _step2Calculated[index];
+            child: ListView.builder(
+              itemCount: providerGroups.length,
+              itemBuilder: (context, groupIndex) {
+                final group = providerGroups[groupIndex];
+                final isExpanded = _expandedProviders[group.providerId] ?? true;
+                
+                final totalUo = group.items.fold<double>(0, (sum, p) => sum + p.uoCount);
+                final totalHt = group.items.fold<double>(0, (sum, p) => sum + p.totalHt);
 
-                return Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        flex: 3,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(item.consultantName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                            const SizedBox(height: 2),
-                            Text(item.projectName, style: const TextStyle(fontSize: 12, color: VivColors.gray400)),
-                          ],
-                        ),
-                      ),
-                      Expanded(
-                        flex: 3,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(item.clientName, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                            const SizedBox(height: 4),
-                            if (item.appliedRule != null)
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: Colors.blueAccent.withAlpha((0.1 * 255).round()),
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Text(
-                                  item.appliedRule!,
-                                  style: const TextStyle(color: Colors.blueAccent, fontWeight: FontWeight.bold, fontSize: 10),
-                                ),
-                              )
-                            else
-                              const Text("Calcul standard", style: TextStyle(color: VivColors.gray400, fontSize: 11)),
-                          ],
-                        ),
-                      ),
-                      Expanded(
-                        flex: 2,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text("${item.tjm.toStringAsFixed(0)} € HT", style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
-                            const SizedBox(height: 2),
-                            Text("${item.uoCount} UO (${item.calculationMode})", style: const TextStyle(fontSize: 11, color: VivColors.gray400)),
-                          ],
-                        ),
-                      ),
-                      Expanded(
-                        flex: 2,
-                        child: Text(
-                          "${item.totalHt.toStringAsFixed(0)} € HT",
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                        ),
-                      ),
-                      // Zone Action PDF
-                      Row(
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // En-tête de groupe fournisseur Étape 2
+                    Container(
+                      color: Colors.grey.shade100,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      child: Row(
                         children: [
-                          OutlinedButton.icon(
-                            icon: const Icon(LucideIcons.eye, size: 14, color: Colors.black),
-                            label: const Text("Visualiser", style: TextStyle(color: Colors.black, fontSize: 11, fontWeight: FontWeight.bold)),
-                            style: OutlinedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                              side: const BorderSide(color: VivColors.gray200),
-                            ),
-                            onPressed: () => _viewPdf(item),
-                          ),
-                          const SizedBox(width: 8),
                           IconButton(
-                            icon: const Icon(LucideIcons.download, size: 16, color: VivColors.gray500),
-                            onPressed: () => _downloadPdf(item),
+                            icon: Icon(isExpanded ? LucideIcons.chevronDown : LucideIcons.chevronRight, size: 18),
+                            onPressed: () {
+                              setState(() {
+                                _expandedProviders[group.providerId] = !isExpanded;
+                              });
+                            },
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            style: IconButton.styleFrom(
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  group.providerName.toUpperCase(),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12,
+                                    color: VivColors.gray500,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  "${totalHt.toStringAsFixed(0)} € HT consolidés (${totalUo.toStringAsFixed(1)} UO total)",
+                                  style: const TextStyle(fontSize: 10, color: VivColors.gray400, fontWeight: FontWeight.w500),
+                                ),
+                              ],
+                            ),
+                          ),
+                          // Zone Action PDF consolidée par fournisseur
+                          Row(
+                            children: [
+                              OutlinedButton.icon(
+                                icon: const Icon(LucideIcons.eye, size: 14, color: Colors.black),
+                                label: const Text("Visualiser BDC", style: TextStyle(color: Colors.black, fontSize: 11, fontWeight: FontWeight.bold)),
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                  side: const BorderSide(color: VivColors.gray200),
+                                ),
+                                onPressed: () => _viewPdf(group.items.first),
+                              ),
+                              const SizedBox(width: 8),
+                              IconButton(
+                                icon: const Icon(LucideIcons.download, size: 16, color: VivColors.gray500),
+                                onPressed: () => _downloadPdf(group.items.first),
+                              ),
+                            ],
                           ),
                         ],
                       ),
-                    ],
-                  ),
+                    ),
+                    const Divider(height: 1, color: VivColors.gray200),
+                    // Liste des enfants (si étendu)
+                    if (isExpanded)
+                      ListView.separated(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: group.items.length,
+                        separatorBuilder: (c, i) => const Divider(height: 1, color: VivColors.gray200),
+                        itemBuilder: (context, itemIndex) {
+                          final item = group.items[itemIndex];
+
+                          return Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            child: Row(
+                              children: [
+                                const SizedBox(width: 16), // Décalage pour montrer la hiérarchie
+                                Expanded(
+                                  flex: 3,
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(item.consultantName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                                      const SizedBox(height: 2),
+                                      Text(item.projectName, style: const TextStyle(fontSize: 12, color: VivColors.gray400)),
+                                    ],
+                                  ),
+                                ),
+                                Expanded(
+                                  flex: 3,
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(item.clientName, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                                      const SizedBox(height: 4),
+                                      if (item.appliedRule != null)
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: Colors.blueAccent.withAlpha((0.1 * 255).round()),
+                                            borderRadius: BorderRadius.circular(4),
+                                          ),
+                                          child: Text(
+                                            item.appliedRule!,
+                                            style: const TextStyle(color: Colors.blueAccent, fontWeight: FontWeight.bold, fontSize: 10),
+                                          ),
+                                        )
+                                      else
+                                        const Text("Calcul standard", style: TextStyle(color: VivColors.gray400, fontSize: 11)),
+                                    ],
+                                  ),
+                                ),
+                                Expanded(
+                                  flex: 2,
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text("${item.tjm.toStringAsFixed(0)} € HT", style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
+                                      const SizedBox(height: 2),
+                                      Text("${item.uoCount} UO (${item.calculationMode})", style: const TextStyle(fontSize: 11, color: VivColors.gray400)),
+                                    ],
+                                  ),
+                                ),
+                                Expanded(
+                                  flex: 2,
+                                  child: Text(
+                                    "${item.totalHt.toStringAsFixed(0)} € HT",
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                  ),
+                                ),
+                                // Pas de bouton d'action individuel ici !
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                  ],
                 );
               },
             ),
@@ -2393,6 +2703,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
   }
 
   void _viewPdf(BdcPrestaStep2 item) {
+    final providerPrestas = _step2Calculated.where((x) => x.providerId == item.providerId).toList();
     showDialog(
       context: context,
       builder: (context) => Dialog(
@@ -2406,7 +2717,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    "Aperçu du Bon de commande : ${item.consultantName}",
+                    "Aperçu du Bon de commande : ${item.providerName}",
                     style: VivTypography.h4.copyWith(fontSize: 16),
                   ),
                   IconButton(
@@ -2418,7 +2729,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
               const Divider(),
               Expanded(
                 child: PdfPreview(
-                  build: (format) => BdcPdfService.generateBdcPdf(item, _selectedMonth, _selectedYear),
+                  build: (format) => BdcPdfService.generateBdcPdf(providerPrestas, _selectedMonth, _selectedYear),
                   allowPrinting: false,
                   allowSharing: false,
                   canChangePageFormat: false,
@@ -2434,8 +2745,9 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
 
   void _downloadPdf(BdcPrestaStep2 item) async {
     try {
-      final bytes = await BdcPdfService.generateBdcPdf(item, _selectedMonth, _selectedYear);
-      final filename = 'BDC_${item.consultantName.replaceAll(' ', '_')}.pdf';
+      final providerPrestas = _step2Calculated.where((x) => x.providerId == item.providerId).toList();
+      final bytes = await BdcPdfService.generateBdcPdf(providerPrestas, _selectedMonth, _selectedYear);
+      final filename = 'BDC_CSOC${item.providerId}_$_selectedYear$_selectedMonth.pdf';
       await Printing.sharePdf(bytes: bytes, filename: filename);
       
       if (mounted) {
@@ -2522,4 +2834,34 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
       }
     }
   }
+}
+
+class _ProviderGroup {
+  final String providerId;
+  final String providerName;
+  final List<BdcPrestaStep1> items;
+  _ProviderGroup({
+    required this.providerId,
+    required this.providerName,
+    required this.items,
+  });
+}
+
+class _ProviderGroupStep2 {
+  final String providerId;
+  final String providerName;
+  final List<BdcPrestaStep2> items;
+  _ProviderGroupStep2({
+    required this.providerId,
+    required this.providerName,
+    required this.items,
+  });
+}
+
+double _parseTjm(dynamic value) {
+  if (value == null) return 0;
+  final cleanString = value.toString()
+      .replaceAll(',', '.')
+      .replaceAll(RegExp(r'[^0-9.-]'), '');
+  return double.tryParse(cleanString) ?? 0;
 }
