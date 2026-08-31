@@ -622,6 +622,30 @@ class BoondService {
     return await _dio.put('companies/$id/information', data: payload);
   }
 
+  /// Recherche des contacts avec des mots clés (nom, prénom, email, fonction)
+  Future<List<dynamic>> searchContacts(String keywords, {String? companyId}) async {
+    try {
+      final queryParams = <String, dynamic>{'keywords': keywords};
+      if (companyId != null && companyId.isNotEmpty) {
+        queryParams['company'] = companyId;
+      }
+      final response = await _dio.get('contacts', queryParameters: queryParams);
+      return response.data['data'] as List? ?? [];
+    } catch (e) {
+      throw 'Erreur lors de la recherche de contacts : $e';
+    }
+  }
+
+  /// Crée un contact dans BoondManager
+  Future<Response> createContact(Map<String, dynamic> payload) async {
+    return await _dio.post('contacts', data: payload);
+  }
+
+  /// Met à jour les informations d'un contact
+  Future<Response> updateContactInformation(String id, Map<String, dynamic> payload) async {
+    return await _dio.put('contacts/$id/information', data: payload);
+  }
+
   /// Exécute une requête GET brute (utile pour inspecter les en-têtes et les métadonnées de réponse)
   Future<Response<T>> getRaw<T>(String path, {Map<String, dynamic>? queryParameters}) {
     return _dio.get<T>(path, queryParameters: queryParameters);
