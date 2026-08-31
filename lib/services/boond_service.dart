@@ -646,6 +646,28 @@ class BoondService {
     return await _dio.put('contacts/$id/information', data: payload);
   }
 
+  /// Récupère la liste des contrats d'une ressource
+  Future<List<dynamic>> getContractsForResource(String resourceId) async {
+    try {
+      final response = await _dio.get('contracts', queryParameters: {'resource': resourceId});
+      return response.data['data'] as List? ?? [];
+    } catch (e) {
+      // Fallback via administrative tab si /contracts?resource n'est pas supporté directement
+      try {
+        final adminResp = await _dio.get('resources/$resourceId/administrative');
+        final included = adminResp.data['included'] as List? ?? [];
+        return included.where((item) => item['type'] == 'contract' || item['type'] == 'contracts').toList();
+      } catch (_) {
+        throw 'Erreur lors de la récupération des contrats de la ressource : $e';
+      }
+    }
+  }
+
+  /// Crée un contrat dans BoondManager
+  Future<Response> createContract(Map<String, dynamic> payload) async {
+    return await _dio.post('contracts', data: payload);
+  }
+
   /// Exécute une requête GET brute (utile pour inspecter les en-têtes et les métadonnées de réponse)
   Future<Response<T>> getRaw<T>(String path, {Map<String, dynamic>? queryParameters}) {
     return _dio.get<T>(path, queryParameters: queryParameters);

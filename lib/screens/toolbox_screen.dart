@@ -11,6 +11,7 @@ import 'tools/bdc_rules_diagnostic_screen.dart';
 import 'tools/create_resource_tool_screen.dart';
 import 'tools/create_company_tool_screen.dart';
 import 'tools/create_contact_tool_screen.dart';
+import 'tools/contracts_management_tool_screen.dart';
 import '../services/bdc_sent_logs_service.dart';
 
 
@@ -129,7 +130,21 @@ class ToolboxScreen extends StatelessWidget {
                     "Visualiser, créer et associer des contrats administratifs ou RH.",
                 icon: LucideIcons.fileText,
                 onPressed: () {
-                  // En développement
+                  showDialog(
+                    context: context,
+                    barrierDismissible: true,
+                    builder: (context) => Center(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 40),
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 1000, maxHeight: 800),
+                          child: ContractsManagementToolWidget(
+                            onClose: () => Navigator.of(context).pop(),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
                 },
                 status: ToolStatus.wip,
               ),
