@@ -18,6 +18,7 @@ class BoondService {
   final String user;
   final String password;
   late final Dio _dio;
+  List<Map<String, dynamic>>? _cachedManagers;
 
   BoondService({
     required String baseUrl,
@@ -458,9 +459,162 @@ class BoondService {
     }
   }
 
+  /// Récupère la liste des utilisateurs/managers (avec cache en mémoire et appels API optimisés en parallèle)
+  Future<List<Map<String, dynamic>>> getUsers({bool forceRefresh = false}) async {
+    if (!forceRefresh && _cachedManagers != null) {
+      return _cachedManagers!;
+    }
+
+    try {
+      // 1. Tenter par perimeters avec inclusion managers (1 appel)
+      try {
+        final response = await _dio.get('application/perimeters', queryParameters: {'include': 'managers'});
+        final dataMap = response.data as Map<String, dynamic>? ?? {};
+        final included = dataMap['included'] as List? ?? [];
+        if (included.isNotEmpty) {
+          final List<Map<String, dynamic>> managers = included.map<Map<String, dynamic>>((item) {
+            final id = item['id']?.toString() ?? '';
+            final attrs = item['attributes'] as Map<String, dynamic>? ?? {};
+            final name = '${attrs['firstName'] ?? ''} ${attrs['lastName'] ?? ''}'.trim();
+            return {
+              'id': id,
+              'name': name.isNotEmpty ? name : 'ID $id',
+            };
+          }).toList();
+          if (managers.isNotEmpty) {
+            _cachedManagers = managers;
+            return managers;
+          }
+        }
+      } catch (_) {
+        // En cas d'échec ou d'absence d'inclusions, passer à la suite
+      }
+
+      // 2. Alternative optimisée : Récupérer toutes les ressources (1 appel)
+      final response = await _dio.get('resources', queryParameters: {'numberPerPage': 150});
+      final dataMap = response.data as Map<String, dynamic>? ?? {};
+      final List<dynamic> resourcesData = dataMap['data'] as List? ?? [];
+
+      // Filtrer pour ne garder que les ressources actives (state == 1)
+      final activeResources = resourcesData.where((r) {
+        final attrs = r['attributes'] as Map<String, dynamic>? ?? {};
+        final state = attrs['state']?.toString();
+        return state == '1';
+      }).toList();
+
+      // Interroger les configurations intranet en parallèle pour toutes les ressources actives !
+      final List<Future<Map<String, dynamic>?>> futures = activeResources.map((r) async {
+        final rId = r['id']?.toString() ?? '';
+        final attrs = r['attributes'] as Map<String, dynamic>? ?? {};
+        final firstName = attrs['firstName']?.toString() ?? '';
+        final lastName = attrs['lastName']?.toString() ?? '';
+        final name = '$firstName $lastName'.trim();
+
+        try {
+          final intraResp = await _dio.get('resources/$rId/settings/intranet');
+          final intraData = intraResp.data as Map<String, dynamic>? ?? {};
+          final intraObj = intraData['data'] as Map<String, dynamic>? ?? {};
+          final intraAttrs = intraObj['attributes'] as Map<String, dynamic>? ?? {};
+          final level = intraAttrs['level']?.toString() ?? '';
+
+          if (level == 'manager' || level == 'administrator' || level.toLowerCase().contains('manager') || level.toLowerCase().contains('admin')) {
+            return {
+              'id': rId,
+              'name': name.isNotEmpty ? name : 'ID $rId',
+            };
+          }
+        } catch (_) {
+          // Ignorer l'échec et ne pas le classer en manager
+        }
+        return null;
+      }).toList();
+
+      final List<Map<String, dynamic>?> results = await Future.wait(futures);
+      final List<Map<String, dynamic>> potentialManagers = results.whereType<Map<String, dynamic>>().toList();
+
+      if (potentialManagers.isNotEmpty) {
+        _cachedManagers = potentialManagers;
+        return potentialManagers;
+      }
+
+      // Fallback si vraiment aucun manager trouvé avec un compte :
+      // On prend tous les profils de structure par défaut (typeOf != 0, 1, 10)
+      final fallbackList = activeResources.where((r) {
+        final attrs = r['attributes'] as Map<String, dynamic>? ?? {};
+        final typeOf = attrs['typeOf']?.toString() ?? '';
+        return typeOf != '0' && typeOf != '1' && typeOf != '10';
+      }).map<Map<String, dynamic>>((r) {
+        final rId = r['id']?.toString() ?? '';
+        final attrs = r['attributes'] as Map<String, dynamic>? ?? {};
+        final name = '${attrs['firstName'] ?? ''} ${attrs['lastName'] ?? ''}'.trim();
+        return {
+          'id': rId,
+          'name': name.isNotEmpty ? name : 'ID $rId',
+        };
+      }).toList();
+
+      _cachedManagers = fallbackList;
+      return fallbackList;
+    } catch (e) {
+      throw 'Erreur getUsers : $e';
+    }
+  }
+
+  /// Récupère la liste des pôles
+  Future<List<Map<String, dynamic>>> getPoles() async {
+    try {
+      final response = await _dio.get('poles');
+      final List<dynamic> data = response.data['data'];
+      return data.map((e) {
+        final attrs = e['attributes'] as Map<String, dynamic>? ?? {};
+        return {
+          'id': e['id']?.toString(),
+          'name': attrs['name']?.toString() ?? 'Pôle sans nom',
+        };
+      }).toList();
+    } catch (e) {
+      throw 'Erreur getPoles : $e';
+    }
+  }
+
+  /// Recherche des ressources avec des mots clés (nom, prénom, email, référence)
+  Future<List<dynamic>> searchResources(String keywords) async {
+    try {
+      final response = await _dio.get('resources', queryParameters: {'keywords': keywords});
+      return response.data['data'] as List? ?? [];
+    } catch (e) {
+      throw 'Erreur lors de la recherche de ressources : $e';
+    }
+  }
+
+  /// Crée une ressource dans BoondManager
+  Future<Response> createResource(Map<String, dynamic> payload) async {
+    return await _dio.post('resources', data: payload);
+  }
+
+  /// Met à jour les informations d'une ressource
+  Future<Response> updateResourceInformation(String id, Map<String, dynamic> payload) async {
+    return await _dio.put('resources/$id/information', data: payload);
+  }
+
+  /// Met à jour les données administratives et relations d'une ressource
+  Future<Response> updateResourceAdministrative(String id, Map<String, dynamic> payload) async {
+    return await _dio.put('resources/$id/administrative', data: payload);
+  }
+
   /// Exécute une requête GET brute (utile pour inspecter les en-têtes et les métadonnées de réponse)
   Future<Response<T>> getRaw<T>(String path, {Map<String, dynamic>? queryParameters}) {
     return _dio.get<T>(path, queryParameters: queryParameters);
+  }
+
+  /// Exécute une requête POST brute
+  Future<Response<T>> postRaw<T>(String path, {dynamic data}) {
+    return _dio.post<T>(path, data: data);
+  }
+
+  /// Exécute une requête PUT brute
+  Future<Response<T>> putRaw<T>(String path, {dynamic data}) {
+    return _dio.put<T>(path, data: data);
   }
 
   /// Teste la connexion à BoondManager

@@ -8,6 +8,7 @@ import 'tools/bdc_diagnostic_screen.dart';
 import 'tools/data_extraction_widget.dart';
 import 'tools/api_quota_diagnostic_screen.dart';
 import 'tools/bdc_rules_diagnostic_screen.dart';
+import 'tools/create_resource_tool_screen.dart';
 import '../services/bdc_sent_logs_service.dart';
 
 
@@ -47,6 +48,60 @@ class ToolboxScreen extends StatelessWidget {
                   // Prochainement
                 },
                 status: ToolStatus.comingSoon,
+              ),
+              _ToolDefinition(
+                title: "Créer une ressource",
+                description:
+                    "Créer et configurer une nouvelle ressource dans BoondManager.",
+                icon: LucideIcons.userPlus,
+                onPressed: () {
+                  showDialog(
+                    context: context,
+                    barrierDismissible: true,
+                    builder: (context) => Center(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 40),
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 1000, maxHeight: 800),
+                          child: CreateResourceToolWidget(
+                            onClose: () => Navigator.of(context).pop(),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+                status: ToolStatus.wip,
+              ),
+              _ToolDefinition(
+                title: "Créer une société",
+                description:
+                    "Ajouter une nouvelle fiche société (client ou fournisseur).",
+                icon: LucideIcons.building,
+                onPressed: () {
+                  // En développement
+                },
+                status: ToolStatus.wip,
+              ),
+              _ToolDefinition(
+                title: "Créer un contact",
+                description:
+                    "Créer un nouveau contact rattaché à une fiche société.",
+                icon: LucideIcons.contact,
+                onPressed: () {
+                  // En développement
+                },
+                status: ToolStatus.wip,
+              ),
+              _ToolDefinition(
+                title: "Gestion des contrats",
+                description:
+                    "Visualiser, créer et associer des contrats administratifs ou RH.",
+                icon: LucideIcons.fileText,
+                onPressed: () {
+                  // En développement
+                },
+                status: ToolStatus.wip,
               ),
             ],
           ),
