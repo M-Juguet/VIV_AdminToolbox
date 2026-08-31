@@ -602,6 +602,26 @@ class BoondService {
     return await _dio.put('resources/$id/administrative', data: payload);
   }
 
+  /// Recherche des sociétés avec des mots clés (nom, SIREN, TVA, etc.)
+  Future<List<dynamic>> searchCompanies(String keywords) async {
+    try {
+      final response = await _dio.get('companies', queryParameters: {'keywords': keywords});
+      return response.data['data'] as List? ?? [];
+    } catch (e) {
+      throw 'Erreur lors de la recherche de sociétés : $e';
+    }
+  }
+
+  /// Crée une société dans BoondManager
+  Future<Response> createCompany(Map<String, dynamic> payload) async {
+    return await _dio.post('companies', data: payload);
+  }
+
+  /// Met à jour les informations d'une société
+  Future<Response> updateCompanyInformation(String id, Map<String, dynamic> payload) async {
+    return await _dio.put('companies/$id/information', data: payload);
+  }
+
   /// Exécute une requête GET brute (utile pour inspecter les en-têtes et les métadonnées de réponse)
   Future<Response<T>> getRaw<T>(String path, {Map<String, dynamic>? queryParameters}) {
     return _dio.get<T>(path, queryParameters: queryParameters);
