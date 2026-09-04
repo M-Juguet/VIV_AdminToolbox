@@ -136,11 +136,13 @@ class BoondService {
 
     int currentPage = 1;
     int totalPages = 1;
+    int? totalRows;
 
     do {
       final Map<String, dynamic> params = Map.from(filters ?? {});
       params['page'] = currentPage;
       params['maxResults'] = maxResultsPerPage;
+      params['numberPerPage'] = maxResultsPerPage;
       if (inclusions != null && inclusions.isNotEmpty) {
         params['include'] = inclusions.join(',');
       }
@@ -166,13 +168,37 @@ class BoondService {
       final List<dynamic> included = pageData['included'] as List? ?? [];
       final dynamic meta = pageData['meta'];
 
+      // Extraction robuste des métadonnées de pagination BoondManager
+      int? detectedTotalPages;
       if (meta is Map) {
         final dynamic totals = meta['totals'] ?? meta['pagination'];
-        if (totals is Map && totals['totalPages'] != null) {
-          totalPages = int.tryParse(totals['totalPages'].toString()) ?? totalPages;
-        } else if (meta['totalPages'] != null) {
-          totalPages = int.tryParse(meta['totalPages'].toString()) ?? totalPages;
+        if (totals is Map) {
+          detectedTotalPages = int.tryParse(totals['totalPages']?.toString() ?? '') ??
+              int.tryParse(totals['pages']?.toString() ?? '') ??
+              int.tryParse(totals['nbPages']?.toString() ?? '');
+          totalRows = int.tryParse(totals['rows']?.toString() ?? '') ??
+              int.tryParse(totals['total']?.toString() ?? '') ??
+              int.tryParse(totals['totalRows']?.toString() ?? '') ??
+              int.tryParse(totals['count']?.toString() ?? '');
+        } else if (totals is num) {
+          totalRows = totals.toInt();
         }
+
+        detectedTotalPages ??= int.tryParse(meta['totalPages']?.toString() ?? '') ??
+            int.tryParse(meta['pages']?.toString() ?? '');
+        totalRows ??= int.tryParse(meta['rows']?.toString() ?? '') ??
+            int.tryParse(meta['total']?.toString() ?? '') ??
+            int.tryParse(meta['count']?.toString() ?? '');
+      }
+
+      if (detectedTotalPages != null && detectedTotalPages > 0) {
+        totalPages = detectedTotalPages;
+      } else if (totalRows != null && totalRows > 0) {
+        final pageSize = projects.isNotEmpty ? projects.length : 50;
+        totalPages = (totalRows / pageSize).ceil();
+      } else if (projects.length >= 50) {
+        // Si la page est pleine (50 éléments), il y a potentiellement une page suivante
+        totalPages = currentPage + 1;
       }
 
       allProjects.addAll(projects);
@@ -186,9 +212,11 @@ class BoondService {
 
       onProgress?.call(currentPage, totalPages, allProjects.length);
 
-      if (projects.isEmpty || currentPage >= totalPages || currentPage >= maxPages) {
-        break;
-      }
+      // Conditions d'arrêt : page vide, ou tous les rows atteints, ou fin de pagination, ou maxPages atteint
+      if (projects.isEmpty) break;
+      if (totalRows != null && allProjects.length >= totalRows) break;
+      if (currentPage >= totalPages && projects.length < 50) break;
+      if (currentPage >= maxPages) break;
 
       currentPage++;
     } while (currentPage <= totalPages && currentPage <= maxPages);
@@ -200,6 +228,7 @@ class BoondService {
         'totalCount': allProjects.length,
         'pagesLoaded': currentPage,
         'totalPages': totalPages,
+        'totalRows': totalRows ?? allProjects.length,
       }
     };
   }
