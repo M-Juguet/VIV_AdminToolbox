@@ -116,10 +116,33 @@ class _BdcDiagnosticScreenState extends ConsumerState<BdcDiagnosticScreen> {
         },
       );
 
-      final List<dynamic> projects = projectsResponse['data'] as List? ?? [];
+      final List<dynamic> rawProjects = projectsResponse['data'] as List? ?? [];
       final List<dynamic> included = projectsResponse['included'] as List? ?? [];
       final meta = projectsResponse['meta'] as Map? ?? {};
       httpCallsCount += (meta['pagesLoaded'] as int? ?? 1);
+
+      // Filtrage strict des projets sur la période (startDate / endDate) et l'agence
+      final List<dynamic> projects = rawProjects.where((p) {
+        final pAttr = p['attributes'] ?? {};
+        final pAgencyId = p['relationships']?['agency']?['data']?['id']?.toString();
+        if (_agencyId.isNotEmpty && pAgencyId != null && pAgencyId != _agencyId) {
+          return false;
+        }
+
+        final pStartStr = pAttr['startDate']?.toString();
+        final pEndStr = pAttr['endDate']?.toString();
+        final pStart = pStartStr != null ? DateTime.tryParse(pStartStr) : null;
+        final pEnd = pEndStr != null ? DateTime.tryParse(pEndStr) : null;
+
+        // Intersection avec le mois sélectionné
+        final intersection = CalendarService.getIntersection(
+          prestationStart: pStart ?? DateTime(1970),
+          prestationEnd: pEnd,
+          month: monthInt,
+          year: yearInt,
+        );
+        return intersection != null;
+      }).toList();
 
       // Résolution rapide des clients
       final Map<String, String> companyNames = {};
@@ -131,7 +154,7 @@ class _BdcDiagnosticScreenState extends ConsumerState<BdcDiagnosticScreen> {
         }
       }
 
-      setState(() => _statusText = "3/4 Analyse des prestations pour ${projects.length} projets (parallélisation contrôlée)...");
+      setState(() => _statusText = "3/4 Analyse des prestations pour ${projects.length} projets filtrés sur la période (${rawProjects.length} projets bruts)...");
 
       // 4. Parallélisation par lots (Pool de 6 projets simultanés)
       final List<Map<String, dynamic>> detectedPrestas = [];
