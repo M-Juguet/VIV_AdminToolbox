@@ -249,7 +249,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
       final yearInt = int.tryParse(_selectedYear) ?? DateTime.now().year;
       _holidays = await service.getHolidays(yearInt);
 
-      // Charger le dictionnaire pour obtenir l'ID de l'état "Sortie"
+      // Charger le dictionnaire pour obtenir l'ID de l'état "Sortie" et les types de ressources externes
       final dict = await service.getDictionary(forceRefresh: true);
       final resourceStates = dict['data']?['setting']?['state']?['resource'] as List? ?? [];
       int? exitStateId;
@@ -258,6 +258,16 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
         if (label.contains('sortie')) {
           exitStateId = int.tryParse(state['id']?.toString() ?? '');
           break;
+        }
+      }
+
+      final resourceTypes = dict['data']?['setting']?['typeOf']?['resource'] as List? ?? [];
+      final Set<int> externalResourceTypeIds = {1, 14}; // 1: Freelance, 14: Portage
+      for (var type in resourceTypes) {
+        final label = (type['value'] ?? type['label'] ?? '').toString().toLowerCase();
+        if (label.contains('externe') || label.contains('freelance') || label.contains('portage') || label.contains('sous-trait')) {
+          final idInt = int.tryParse(type['id']?.toString() ?? '');
+          if (idInt != null) externalResourceTypeIds.add(idInt);
         }
       }
 
@@ -361,8 +371,8 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                 } else {
                   resourceName = "${rAttr['firstName'] ?? ''} ${rAttr['lastName'] ?? ''}".trim();
                   consultantTitle = rAttr['title']?.toString() ?? rAttr['function']?.toString();
-                  // typeOf = 1 pour ressource externe (sous-traitant)
-                  if (rAttr['typeOf'] == 1) {
+                  final resType = int.tryParse(rAttr['typeOf']?.toString() ?? '');
+                  if (resType != null && externalResourceTypeIds.contains(resType)) {
                     isExternalResource = true;
                   }
                 }
