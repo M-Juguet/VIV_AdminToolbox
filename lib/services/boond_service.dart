@@ -121,6 +121,89 @@ class BoondService {
     }
   }
 
+  /// Récupère TOUS les projets paginés correspondant aux filtres avec inclusions relationnelles
+  Future<Map<String, dynamic>> getAllProjectsWithInclusions({
+    Map<String, dynamic>? filters,
+    List<String>? inclusions,
+    int maxPages = 50,
+    int maxResultsPerPage = 100,
+    bool forceRefresh = false,
+    void Function(int currentPage, int totalPages, int loadedProjects)? onProgress,
+  }) async {
+    final List<dynamic> allProjects = [];
+    final List<dynamic> allIncluded = [];
+    final Set<String> includedKeys = {};
+
+    int currentPage = 1;
+    int totalPages = 1;
+
+    do {
+      final Map<String, dynamic> params = Map.from(filters ?? {});
+      params['page'] = currentPage;
+      params['maxResults'] = maxResultsPerPage;
+      if (inclusions != null && inclusions.isNotEmpty) {
+        params['include'] = inclusions.join(',');
+      }
+
+      final cacheKey = 'all_projects_p${currentPage}_${jsonEncode(params)}';
+      final cache = BoondCacheService();
+      Map<String, dynamic>? pageData;
+
+      if (!forceRefresh) {
+        final cached = await cache.get(cacheKey, ttl: const Duration(hours: 12));
+        if (cached != null) {
+          pageData = Map<String, dynamic>.from(cached);
+        }
+      }
+
+      if (pageData == null) {
+        final response = await _dio.get('projects', queryParameters: params);
+        pageData = response.data as Map<String, dynamic>;
+        await cache.put(cacheKey, pageData);
+      }
+
+      final List<dynamic> projects = pageData['data'] as List? ?? [];
+      final List<dynamic> included = pageData['included'] as List? ?? [];
+      final dynamic meta = pageData['meta'];
+
+      if (meta is Map) {
+        final dynamic totals = meta['totals'] ?? meta['pagination'];
+        if (totals is Map && totals['totalPages'] != null) {
+          totalPages = int.tryParse(totals['totalPages'].toString()) ?? totalPages;
+        } else if (meta['totalPages'] != null) {
+          totalPages = int.tryParse(meta['totalPages'].toString()) ?? totalPages;
+        }
+      }
+
+      allProjects.addAll(projects);
+      for (var inc in included) {
+        final key = "${inc['type']}_${inc['id']}";
+        if (!includedKeys.contains(key)) {
+          includedKeys.add(key);
+          allIncluded.add(inc);
+        }
+      }
+
+      onProgress?.call(currentPage, totalPages, allProjects.length);
+
+      if (projects.isEmpty || currentPage >= totalPages || currentPage >= maxPages) {
+        break;
+      }
+
+      currentPage++;
+    } while (currentPage <= totalPages && currentPage <= maxPages);
+
+    return {
+      'data': allProjects,
+      'included': allIncluded,
+      'meta': {
+        'totalCount': allProjects.length,
+        'pagesLoaded': currentPage,
+        'totalPages': totalPages,
+      }
+    };
+  }
+
   /// Récupère un projet spécifique par son ID avec inclusions relationnelles (ex: include=company)
   Future<Map<String, dynamic>> getProjectWithInclusions(
     int id, {

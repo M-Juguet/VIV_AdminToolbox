@@ -261,9 +261,20 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
         }
       }
 
-      // 1. Récupérer les projets actifs
-      final response = await service.getProjectsWithInclusions(
-        filters: {'states[]': 1}, // Projets actifs
+      final monthInt = int.tryParse(_selectedMonth) ?? DateTime.now().month;
+      final lastDay = DateTime(yearInt, monthInt + 1, 0).day;
+      final startDateStr = "$yearInt-${monthInt.toString().padLeft(2, '0')}-01";
+      final endDateStr = "$yearInt-${monthInt.toString().padLeft(2, '0')}-${lastDay.toString().padLeft(2, '0')}";
+      final startOfPeriod = DateTime(yearInt, monthInt, 1);
+      final endOfPeriod = monthInt == 12 ? DateTime(yearInt + 1, 1, 0) : DateTime(yearInt, monthInt + 1, 0);
+
+      // 1. Récupérer les projets actifs paginés avec dates en amont
+      final response = await service.getAllProjectsWithInclusions(
+        filters: {
+          'states[]': 1, // Projets actifs
+          'startDate': startDateStr,
+          'endDate': endDateStr,
+        },
         inclusions: ['company'],
         forceRefresh: true,
       );
@@ -294,11 +305,6 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
 
         // Récupérer les prestations du projet
         final List<dynamic> deliveries = await service.getDeliveries(projectId, forceRefresh: true);
-        
-        final monthInt = int.tryParse(_selectedMonth) ?? DateTime.now().month;
-        final yearInt = int.tryParse(_selectedYear) ?? DateTime.now().year;
-        final startOfPeriod = DateTime(yearInt, monthInt, 1);
-        final endOfPeriod = monthInt == 12 ? DateTime(yearInt + 1, 1, 0) : DateTime(yearInt, monthInt + 1, 0);
 
         for (var delivery in deliveries) {
           final delId = delivery['id']?.toString() ?? '';

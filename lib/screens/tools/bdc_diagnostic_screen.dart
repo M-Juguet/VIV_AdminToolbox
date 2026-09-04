@@ -6,6 +6,7 @@ import '../../design_system/viv_colors.dart';
 import '../../design_system/viv_spacing.dart';
 import '../../design_system/viv_typography.dart';
 import '../../services/boond_service.dart';
+import '../../services/calendar_service.dart';
 import '../../services/email_service.dart';
 import '../../providers/settings_provider.dart';
 
@@ -23,33 +24,438 @@ class _BdcDiagnosticScreenState extends ConsumerState<BdcDiagnosticScreen> {
   String _jsonResponse = "";
   int _apiCallsCount = 0;
 
-  // Filtres locaux
+  // Filtres & Période pour le banc de test
+  String _selectedMonth = "08";
+  String _selectedYear = "2026";
+  int _maxPagesLimit = 50; // 50 = sans restriction pratique
   String _agencyId = "";
-  bool _includeDeliveries = true;
-  bool _includePurchase = true;
-  bool _includeCompany = true;
   String _smtpTestRecipient = "";
+
+  // Résultats structurés du test Approche A
+  Map<String, dynamic>? _lastAuditReport;
+
+  Future<void> _runApprocheATest() async {
+    setState(() {
+      _isLoading = true;
+      _statusText = "🚀 Démarrage du banc d'essai Approche A (Période : $_selectedMonth/$_selectedYear)...";
+      _jsonResponse = "";
+      _lastAuditReport = null;
+    });
+
+    final service = ref.read(boondServiceProvider);
+    final monthInt = int.tryParse(_selectedMonth) ?? DateTime.now().month;
+    final yearInt = int.tryParse(_selectedYear) ?? DateTime.now().year;
+    final lastDay = DateTime(yearInt, monthInt + 1, 0).day;
+    final startDateStr = "$yearInt-${monthInt.toString().padLeft(2, '0')}-01";
+    final endDateStr = "$yearInt-${monthInt.toString().padLeft(2, '0')}-${lastDay.toString().padLeft(2, '0')}";
+
+    final startTime = DateTime.now();
+    int httpCallsCount = 0;
+
+    try {
+      // 1. Jours fériés
+      setState(() => _statusText = "1/4 Chargement des jours fériés et du référentiel...");
+      final holidays = await service.getHolidays(yearInt);
+      httpCallsCount++;
+
+      // 2. Dictionnaire (État Sortie et Contact Administratif)
+      final dict = await service.getDictionary(forceRefresh: false);
+      httpCallsCount++;
+      final resourceStates = dict['data']?['setting']?['state']?['resource'] as List? ?? [];
+      int? exitStateId;
+      for (var state in resourceStates) {
+        final label = (state['value'] ?? state['label'] ?? '').toString().toLowerCase();
+        if (label.contains('sortie')) {
+          exitStateId = int.tryParse(state['id']?.toString() ?? '');
+          break;
+        }
+      }
+
+      final contactTypes = dict['data']?['setting']?['typeOf']?['contact'] as List? ?? [];
+      int? adminTypeId;
+      for (var type in contactTypes) {
+        final val = (type['value'] ?? type['label'] ?? '').toString().toLowerCase();
+        if (val.contains('administratif')) {
+          adminTypeId = int.tryParse(type['id']?.toString() ?? '');
+          break;
+        }
+      }
+
+      // 3. Projets actifs paginés avec dates en amont
+      setState(() => _statusText = "2/4 Récupération paginée des projets actifs sur la période ($startDateStr au $endDateStr)...");
+
+      final Map<String, dynamic> projectFilters = {
+        'states[]': 1,
+        'startDate': startDateStr,
+        'endDate': endDateStr,
+      };
+      if (_agencyId.isNotEmpty) {
+        projectFilters['agency'] = _agencyId;
+      }
+
+      final projectsResponse = await service.getAllProjectsWithInclusions(
+        filters: projectFilters,
+        inclusions: ['company'],
+        maxPages: _maxPagesLimit,
+        maxResultsPerPage: 50,
+        forceRefresh: true,
+        onProgress: (page, totalPages, count) {
+          setState(() {
+            _statusText = "2/4 Récupération des projets : Page $page / $totalPages ($count projets)...";
+          });
+        },
+      );
+
+      final List<dynamic> projects = projectsResponse['data'] as List? ?? [];
+      final List<dynamic> included = projectsResponse['included'] as List? ?? [];
+      final meta = projectsResponse['meta'] as Map? ?? {};
+      httpCallsCount += (meta['pagesLoaded'] as int? ?? 1);
+
+      // Résolution rapide des clients
+      final Map<String, String> companyNames = {};
+      for (var item in included) {
+        if (item['type'] == 'company' || item['type'] == 'companies') {
+          final id = item['id']?.toString() ?? '';
+          final name = item['attributes']?['name']?.toString() ?? 'Société sans nom';
+          companyNames[id] = name;
+        }
+      }
+
+      setState(() => _statusText = "3/4 Analyse des prestations pour ${projects.length} projets (parallélisation contrôlée)...");
+
+      // 4. Parallélisation par lots (Pool de 6 projets simultanés)
+      final List<Map<String, dynamic>> detectedPrestas = [];
+      const int batchSize = 6;
+
+      for (int i = 0; i < projects.length; i += batchSize) {
+        final batch = projects.skip(i).take(batchSize).toList();
+        
+        final batchFutures = batch.map((p) async {
+          final projectIdStr = p['id']?.toString() ?? '';
+          final projectId = int.tryParse(projectIdStr);
+          if (projectId == null) return <Map<String, dynamic>>[];
+
+          final projectName = p['attributes']?['reference']?.toString() ?? 'Projet sans nom';
+          final clientRel = p['relationships']?['company']?['data'];
+          final clientId = clientRel?['id']?.toString();
+          final clientName = companyNames[clientId] ?? 'Client inconnu';
+
+          // Prestations du projet
+          final List<dynamic> deliveries = await service.getDeliveries(projectId, forceRefresh: false);
+
+          final List<Map<String, dynamic>> localPrestas = [];
+
+          for (var delivery in deliveries) {
+            final delId = delivery['id']?.toString() ?? '';
+            final delAttr = delivery['attributes'] ?? {};
+            final delTitle = delAttr['title']?.toString() ?? 'Prestation sans titre';
+
+            if (delTitle.toLowerCase().contains('shift')) continue;
+
+            final startStr = delAttr['startDate']?.toString();
+            final endStr = delAttr['endDate']?.toString();
+
+            if (startStr != null) {
+              final dStart = DateTime.tryParse(startStr);
+              final dEnd = endStr != null ? DateTime.tryParse(endStr) : null;
+              if (dStart != null) {
+                final intersection = CalendarService.getIntersection(
+                  prestationStart: dStart,
+                  prestationEnd: dEnd,
+                  month: monthInt,
+                  year: yearInt,
+                );
+                if (intersection == null) {
+                  // Hors période
+                  continue;
+                }
+              }
+            }
+
+            final dependsOn = delivery['relationships']?['dependsOn']?['data'];
+            final purchaseRel = delivery['relationships']?['purchase']?['data'];
+
+            // Ressource
+            bool isExternal = false;
+            String resourceName = "Non spécifié";
+            String? consultantTitle;
+            bool isExit = false;
+
+            if (dependsOn != null) {
+              final resId = int.tryParse(dependsOn['id']?.toString() ?? '');
+              if (resId != null) {
+                try {
+                  final res = await service.getResource(resId);
+                  final rAttr = res['attributes'] ?? {};
+                  final rState = int.tryParse(rAttr['state']?.toString() ?? '');
+                  if (rState != null && exitStateId != null && rState == exitStateId) {
+                    isExit = true;
+                  } else {
+                    resourceName = "${rAttr['firstName'] ?? ''} ${rAttr['lastName'] ?? ''}".trim();
+                    consultantTitle = rAttr['title']?.toString() ?? rAttr['function']?.toString();
+                    if (rAttr['typeOf'] == 1) {
+                      isExternal = true;
+                    }
+                  }
+                } catch (_) {}
+              }
+            }
+
+            if (isExit) continue;
+            if (!isExternal && purchaseRel == null) continue; // Ignorer salariés internes sans achat
+
+            // Achat & Fournisseur
+            String providerName = "Aucun";
+            String providerId = "";
+            String providerAddress = "";
+            String providerPostcode = "";
+            String providerTown = "";
+            String providerCountry = "France";
+            String? alertMessage;
+            String contactName = "Aucun";
+            String contactEmail = "";
+            String? purchaseIdStr;
+            double purchaseTjm = 0;
+
+            if (purchaseRel == null) {
+              alertMessage = "Aucun achat associé à la prestation.";
+            } else {
+              final purchaseId = int.tryParse(purchaseRel['id']?.toString() ?? '');
+              purchaseIdStr = purchaseId?.toString();
+              if (purchaseId != null) {
+                try {
+                  final pResponse = await service.getPurchaseWithInclusions(purchaseId, forceRefresh: false);
+                  final pAttr = pResponse['data']?['attributes'] ?? {};
+                  purchaseTjm = double.tryParse(pAttr['averageDailyCost']?.toString() ?? '0') ?? 0;
+                  final pIncluded = pResponse['included'] as List? ?? [];
+
+                  // Société Fournisseur
+                  final compObj = pIncluded.firstWhere(
+                    (item) => item['type'] == 'companies' || item['type'] == 'company',
+                    orElse: () => null,
+                  );
+                  if (compObj != null) {
+                    providerName = compObj['attributes']?['name']?.toString() ?? 'Société sans nom';
+                    providerId = compObj['id']?.toString() ?? '';
+                  }
+
+                  // Coordonnées postales complètes
+                  if (providerId.isNotEmpty && int.tryParse(providerId) != null) {
+                    try {
+                      final compInfo = await service.getCompanyInformation(int.parse(providerId));
+                      final cInfoAttr = compInfo['attributes'] ?? {};
+                      providerAddress = cInfoAttr['address']?.toString() ?? '';
+                      providerPostcode = cInfoAttr['postcode']?.toString() ?? '';
+                      providerTown = cInfoAttr['town']?.toString() ?? '';
+                      providerCountry = cInfoAttr['country']?.toString() ?? 'France';
+                    } catch (_) {}
+                  }
+
+                  // Contact
+                  final contactObj = pIncluded.firstWhere(
+                    (item) => item['type'] == 'contacts' || item['type'] == 'contact',
+                    orElse: () => null,
+                  );
+                  if (contactObj != null) {
+                    final cAttr = contactObj['attributes'] ?? {};
+                    contactName = "${cAttr['firstName'] ?? ''} ${cAttr['lastName'] ?? ''}".trim();
+                    contactEmail = (cAttr['email'] ?? cAttr['email1'] ?? cAttr['emailPro'] ?? '').toString();
+                  } else if (providerId.isNotEmpty && int.tryParse(providerId) != null) {
+                    // Fallback contact administratif
+                    try {
+                      final contactsList = await service.getCompanyContacts(int.parse(providerId));
+                      if (contactsList.isEmpty) {
+                        alertMessage = "Aucun contact renseigné pour le fournisseur.";
+                      } else {
+                        final adminContacts = contactsList.where((c) {
+                          if (adminTypeId == null) return false;
+                          final tAttr = c['attributes']?['type'] ?? c['attributes']?['typesOf'];
+                          return tAttr?.toString().contains(adminTypeId.toString()) ?? false;
+                        }).toList();
+
+                        final targetContact = adminContacts.isNotEmpty ? adminContacts.first : contactsList.first;
+                        final cAttr = targetContact['attributes'] ?? {};
+                        contactName = "${cAttr['firstName'] ?? ''} ${cAttr['lastName'] ?? ''}".trim();
+                        contactEmail = (cAttr['email'] ?? cAttr['email1'] ?? cAttr['emailPro'] ?? '').toString();
+                        if (adminContacts.isEmpty && contactsList.length > 1) {
+                          alertMessage = "Plusieurs contacts détectés, aucun typé 'Administratif'.";
+                        }
+                      }
+                    } catch (_) {}
+                  }
+                } catch (_) {}
+              }
+            }
+
+            // Calcul UO
+            int uoCount = 0;
+            if (startStr != null) {
+              final dStart = DateTime.tryParse(startStr);
+              final dEnd = endStr != null ? DateTime.tryParse(endStr) : null;
+              if (dStart != null) {
+                final intersection = CalendarService.getIntersection(
+                  prestationStart: dStart,
+                  prestationEnd: dEnd,
+                  month: monthInt,
+                  year: yearInt,
+                );
+                if (intersection != null) {
+                  uoCount = CalendarService.calculateWorkingDays(
+                    start: intersection['start']!,
+                    end: intersection['end']!,
+                    holidays: holidays,
+                  );
+                }
+              }
+            }
+
+            // Vérification alertes
+            if (alertMessage == null) {
+              if (providerId.isEmpty) {
+                alertMessage = "Aucun fournisseur lié à la prestation.";
+              } else if (contactEmail.isEmpty || !contactEmail.contains('@')) {
+                alertMessage = "E-mail de contact manquant ou invalide.";
+              }
+            }
+
+            // Récupérer le détail de la prestation pour avoir le averageDailyCost précis
+            Map<String, dynamic> deliveryDetail = {};
+            Map<String, dynamic> deliveryDetailAttr = {};
+            try {
+              final delIdInt = int.tryParse(delId);
+              if (delIdInt != null) {
+                deliveryDetail = await service.getDelivery(delIdInt, forceRefresh: false);
+                deliveryDetailAttr = deliveryDetail['data']?['attributes'] ?? {};
+              }
+            } catch (_) {}
+
+            // Calcul du TJM d'achat (averageDailyCost)
+            double averageDailyCost = _parseTjm(deliveryDetailAttr['averageDailyCost']);
+            if (averageDailyCost == 0) {
+              averageDailyCost = _parseTjm(deliveryDetailAttr['contractAverageDailyCost']);
+            }
+            if (averageDailyCost == 0) {
+              averageDailyCost = _parseTjm(delAttr['averageDailyCost']);
+            }
+            if (averageDailyCost == 0) {
+              averageDailyCost = _parseTjm(delAttr['contractAverageDailyCost']);
+            }
+            if (averageDailyCost == 0) {
+              averageDailyCost = purchaseTjm;
+            }
+            if (averageDailyCost == 0) {
+              final double quantitySold = double.tryParse(delAttr['numberOfDaysInvoicedOrQuantity']?.toString() ?? '0') ?? 0;
+              final double costsSimulated = double.tryParse(delAttr['costsSimulatedExcludingTax']?.toString() ?? '0') ?? 0;
+              if (quantitySold > 0 && costsSimulated > 0) {
+                averageDailyCost = costsSimulated / quantitySold;
+              }
+            }
+
+            localPrestas.add({
+              'deliveryId': delId,
+              'title': delTitle,
+              'projectId': projectIdStr,
+              'projectName': projectName,
+              'clientName': clientName,
+              'consultantName': resourceName,
+              'consultantTitle': consultantTitle,
+              'providerId': providerId,
+              'providerName': providerName,
+              'providerAddress': providerAddress,
+              'providerPostcode': providerPostcode,
+              'providerTown': providerTown,
+              'providerCountry': providerCountry,
+              'contactName': contactName,
+              'contactEmail': contactEmail,
+              'purchaseId': purchaseIdStr,
+              'tjmAchat': averageDailyCost,
+              'uoCount': uoCount,
+              'totalHt': uoCount * averageDailyCost,
+              'startDate': startStr,
+              'endDate': endStr,
+              'alertMessage': alertMessage,
+              'hasAlert': alertMessage != null,
+            });
+          }
+
+          return localPrestas;
+        });
+
+        final results = await Future.wait(batchFutures);
+        for (var res in results) {
+          detectedPrestas.addAll(res);
+        }
+      }
+
+      final endTime = DateTime.now();
+      final durationMs = endTime.difference(startTime).inMilliseconds;
+
+      // Synthèse
+      final Set<String> distinctProviders = detectedPrestas
+          .map((p) => p['providerName'].toString())
+          .where((name) => name != "Aucun" && name.isNotEmpty)
+          .toSet();
+
+      final int alertCount = detectedPrestas.where((p) => p['hasAlert'] == true).length;
+      final int validCount = detectedPrestas.length - alertCount;
+      final double totalMontantHt = detectedPrestas.fold(0.0, (sum, item) => sum + (item['totalHt'] as double? ?? 0.0));
+
+      final report = {
+        'performance': {
+          'durationMs': durationMs,
+          'durationSeconds': (durationMs / 1000).toStringAsFixed(1),
+          'httpCallsCount': httpCallsCount,
+          'pagesLoaded': meta['pagesLoaded'] ?? 1,
+          'totalPages': meta['totalPages'] ?? 1,
+        },
+        'summary': {
+          'totalProjectsScanned': projects.length,
+          'totalPrestasDetected': detectedPrestas.length,
+          'distinctProvidersCount': distinctProviders.length,
+          'validPrestasCount': validCount,
+          'alertPrestasCount': alertCount,
+          'totalMontantHt': totalMontantHt,
+        },
+        'providers': distinctProviders.toList(),
+        'prestas': detectedPrestas,
+      };
+
+      setState(() {
+        _isLoading = false;
+        _apiCallsCount += httpCallsCount;
+        _lastAuditReport = report;
+        _statusText = "✅ Test Approche A complété en ${(durationMs / 1000).toStringAsFixed(1)}s !\n"
+            "• Projets scannés : ${projects.length} (Pages : ${meta['pagesLoaded']}/${meta['totalPages']})\n"
+            "• Prestations détectées pour $_selectedMonth/$_selectedYear : ${detectedPrestas.length}\n"
+            "• Fournisseurs uniques : ${distinctProviders.length}\n"
+            "• Conformes : $validCount | Avec alertes : $alertCount\n"
+            "• Volume HT global simulé : ${totalMontantHt.toStringAsFixed(2)} € HT";
+        _jsonResponse = const JsonEncoder.withIndent('  ').convert(report);
+      });
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+        _statusText = "❌ Erreur durant le test Approche A :\n$e";
+        _jsonResponse = "";
+      });
+    }
+  }
 
   Future<void> _runProjectsTest() async {
     setState(() {
       _isLoading = true;
-      _statusText = "Appel en cours...";
+      _statusText = "Appel GET /projects en cours...";
       _jsonResponse = "";
+      _lastAuditReport = null;
     });
 
     final service = ref.read(boondServiceProvider);
 
     try {
-      final List<String> inclusions = [];
-      if (_includeDeliveries) inclusions.add("deliveries");
-      if (_includeDeliveries && _includePurchase) inclusions.add("deliveries.purchase");
-      if (_includeDeliveries && _includePurchase && _includeCompany) {
-        inclusions.add("deliveries.purchase.company");
-      }
-      if (_includeCompany) inclusions.add("company");
+      final List<String> inclusions = ['company', 'deliveries'];
 
       final Map<String, dynamic> filters = {
-        'states[]': 1, // Projets "En cours"
+        'states[]': 1,
       };
       if (_agencyId.isNotEmpty) {
         filters['agency'] = _agencyId;
@@ -57,7 +463,6 @@ class _BdcDiagnosticScreenState extends ConsumerState<BdcDiagnosticScreen> {
 
       final startTime = DateTime.now();
       
-      // Appel API unique
       final response = await service.getProjectsWithInclusions(
         filters: filters,
         inclusions: inclusions,
@@ -69,194 +474,13 @@ class _BdcDiagnosticScreenState extends ConsumerState<BdcDiagnosticScreen> {
       final projects = response['data'] as List? ?? [];
       final included = response['included'] as List? ?? [];
 
-      // Analyse locale des objets inclus
-      int deliveriesCount = 0;
-      int purchasesCount = 0;
-      int companiesCount = 0;
-      final Set<String> types = {};
-
-      for (var item in included) {
-        final type = item['type']?.toString() ?? 'unknown';
-        types.add(type);
-        if (type == 'deliveries') deliveriesCount++;
-        if (type == 'purchases') purchasesCount++;
-        if (type == 'companies') companiesCount++;
-      }
-
-      // Analyse des relations du premier projet pour comprendre la structure
-      String relKeysStr = "Aucune";
-      if (projects.isNotEmpty) {
-        final firstProj = projects.first as Map;
-        final rels = firstProj['relationships'] as Map?;
-        if (rels != null) {
-          relKeysStr = rels.keys.join(', ');
-        }
-      }
-
       setState(() {
         _isLoading = false;
         _apiCallsCount++;
         _statusText = "Succès en $duration ms.\n"
-            "Projets retournés : ${projects.length}\n"
-            "Relations du 1er projet : $relKeysStr\n"
-            "Objets inclus : ${included.length} (Prestations: $deliveriesCount, Achats: $purchasesCount, Sociétés Fournisseurs: $companiesCount)\n"
-            "Types d'entités reçues : ${types.join(', ')}";
+            "Projets retournés (Page 1 sans pagination) : ${projects.length}\n"
+            "Objets inclus : ${included.length}";
         _jsonResponse = const JsonEncoder.withIndent('  ').convert(response);
-      });
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-        _statusText = "Erreur : $e";
-        _jsonResponse = "";
-      });
-    }
-  }
-
-  Future<void> _runHolidaysTest() async {
-    setState(() {
-      _isLoading = true;
-      _statusText = "Appel jours fériés en cours...";
-      _jsonResponse = "";
-    });
-
-    final service = ref.read(boondServiceProvider);
-    final now = DateTime.now();
-
-    try {
-      final startTime = DateTime.now();
-      final holidays = await service.getHolidays(now.year);
-      final endTime = DateTime.now();
-      final duration = endTime.difference(startTime).inMilliseconds;
-
-      setState(() {
-        _isLoading = false;
-        _apiCallsCount++;
-        _statusText = "Succès en $duration ms.\n"
-            "Jours fériés détectés pour ${now.year} : ${holidays.length} jours.";
-        _jsonResponse = const JsonEncoder.withIndent('  ').convert(holidays);
-      });
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-        _statusText = "Erreur : $e";
-        _jsonResponse = "";
-      });
-    }
-  }
-
-  Future<void> _runPurchasesTest() async {
-    setState(() {
-      _isLoading = true;
-      _statusText = "Appel achats en cours...";
-      _jsonResponse = "";
-    });
-
-    final service = ref.read(boondServiceProvider);
-
-    try {
-      final List<String> inclusions = [
-        "project",
-        "providerCompany",
-        "providerContact"
-      ];
-
-      final Map<String, dynamic> filters = {};
-      if (_agencyId.isNotEmpty) {
-        filters['agency'] = _agencyId;
-      }
-
-      final startTime = DateTime.now();
-      
-      final response = await service.getPurchasesWithInclusions(
-        filters: filters,
-        inclusions: inclusions,
-      );
-
-      final endTime = DateTime.now();
-      final duration = endTime.difference(startTime).inMilliseconds;
-
-      final purchases = response['data'] as List? ?? [];
-      final included = response['included'] as List? ?? [];
-
-      int projectsCount = 0;
-      int companiesCount = 0;
-      int contactsCount = 0;
-      final Set<String> types = {};
-
-      for (var item in included) {
-        final type = item['type']?.toString() ?? 'unknown';
-        types.add(type);
-        if (type == 'project' || type == 'projects') projectsCount++;
-        if (type == 'company' || type == 'companies') companiesCount++;
-        if (type == 'contact' || type == 'contacts') contactsCount++;
-      }
-
-      setState(() {
-        _isLoading = false;
-        _apiCallsCount++;
-        _statusText = "Succès en $duration ms.\n"
-            "Achats (purchases) retournés : ${purchases.length}\n"
-            "Objets inclus : ${included.length} (Projets: $projectsCount, Sociétés: $companiesCount, Contacts: $contactsCount)\n"
-            "Types d'entités reçues : ${types.join(', ')}";
-        _jsonResponse = const JsonEncoder.withIndent('  ').convert(response);
-      });
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-        _statusText = "Erreur : $e";
-        _jsonResponse = "";
-      });
-    }
-  }
-
-  Future<void> _runDeliveriesTest() async {
-    if (_agencyId.isEmpty || int.tryParse(_agencyId) == null) {
-      setState(() {
-        _statusText = "Erreur : Vous devez saisir un ID de projet valide dans le champ en haut à gauche pour l'appel Prestations.";
-        _jsonResponse = "";
-      });
-      return;
-    }
-
-    setState(() {
-      _isLoading = true;
-      _statusText = "Appel prestations du projet $_agencyId en cours...";
-      _jsonResponse = "";
-    });
-
-    final service = ref.read(boondServiceProvider);
-    final projectId = int.parse(_agencyId);
-
-    try {
-      final startTime = DateTime.now();
-      
-      // On fait l'appel direct à l'endpoint de projet existant
-      final response = await service.getDeliveries(projectId);
-      
-      final endTime = DateTime.now();
-      final duration = endTime.difference(startTime).inMilliseconds;
-
-      final Set<String> types = {};
-      int withPurchase = 0;
-      int withResource = 0;
-
-      for (var item in response) {
-        final type = item['type']?.toString() ?? 'unknown';
-        types.add(type);
-        final rels = item['relationships'] as Map?;
-        if (rels != null) {
-          if (rels['purchase'] != null && rels['purchase']['data'] != null) withPurchase++;
-          if (rels['resource'] != null && rels['resource']['data'] != null) withResource++;
-        }
-      }
-
-      setState(() {
-        _isLoading = false;
-        _apiCallsCount++;
-        _statusText = "Succès en $duration ms.\n"
-            "Prestations (deliveries) du projet $projectId retournées : ${response.length}\n"
-            "Prestations avec achat lié : $withPurchase | avec ressource : $withResource";
-        _jsonResponse = const JsonEncoder.withIndent('  ').convert({'data': response});
       });
     } catch (e) {
       setState(() {
@@ -301,8 +525,7 @@ class _BdcDiagnosticScreenState extends ConsumerState<BdcDiagnosticScreen> {
         _isLoading = false;
         _apiCallsCount++;
         _statusText = "Succès en $duration ms !\n"
-            "L'e-mail de test SMTP a été envoyé avec succès à : $testRecipient.\n"
-            "Veuillez vérifier votre boîte de réception (et vos spams).";
+            "L'e-mail de test SMTP a été envoyé avec succès à : $testRecipient.";
         _jsonResponse = "{\n  \"status\": \"success\",\n  \"recipient\": \"$testRecipient\",\n  \"server\": \"${settings.smtpHost}:${settings.smtpPort}\"\n}";
       });
     } catch (e) {
@@ -312,251 +535,6 @@ class _BdcDiagnosticScreenState extends ConsumerState<BdcDiagnosticScreen> {
         _jsonResponse = "";
       });
     }
-  }
-
-  Future<void> _runFullBdcSimulation() async {
-    setState(() {
-      _isLoading = true;
-      _statusText = _agencyId.isEmpty 
-          ? "Simulation du flux de données BDC pour TOUS les projets actifs..."
-          : "Simulation du flux de données BDC pour le projet $_agencyId...";
-      _jsonResponse = "";
-    });
-
-    final service = ref.read(boondServiceProvider);
-
-    try {
-      final startTime = DateTime.now();
-      final List<Map<String, dynamic>> projectsToSimulate = [];
-
-      if (_agencyId.isNotEmpty && int.tryParse(_agencyId) != null) {
-        final projectId = int.parse(_agencyId);
-        final response = await service.getProjectWithInclusions(
-          projectId,
-          inclusions: ['company'],
-        );
-        final projData = response['data'] as Map? ?? {};
-        final included = response['included'] as List? ?? [];
-        final name = projData['attributes']?['reference']?.toString() ?? 'Projet ID $projectId';
-        
-        final clientRel = projData['relationships']?['company']?['data'];
-        final clientId = clientRel?['id']?.toString();
-        
-        String clientName = 'Client inconnu';
-        if (clientId != null) {
-          final clientObj = included.firstWhere(
-            (item) => item['type'] == 'company' && item['id']?.toString() == clientId,
-            orElse: () => null,
-          );
-          if (clientObj != null) {
-            clientName = clientObj['attributes']?['name']?.toString() ?? 'Société sans nom';
-          }
-        }
-        projectsToSimulate.add({'id': projectId, 'name': name, 'clientName': clientName});
-      } else {
-        final response = await service.getProjectsWithInclusions(
-          filters: {'states[]': 1},
-          inclusions: ['company'],
-        );
-        final projects = response['data'] as List? ?? [];
-        final included = response['included'] as List? ?? [];
-
-        final Map<String, String> companyNames = {};
-        for (var item in included) {
-          if (item['type'] == 'company') {
-            final id = item['id']?.toString() ?? '';
-            final name = item['attributes']?['name']?.toString() ?? 'Société sans nom';
-            companyNames[id] = name;
-          }
-        }
-
-        for (var p in projects) {
-          final id = int.tryParse(p['id']?.toString() ?? '');
-          final name = p['attributes']?['reference']?.toString() ?? 'Projet sans nom';
-          final clientRel = p['relationships']?['company']?['data'];
-          final clientId = clientRel?['id']?.toString();
-          if (id != null) {
-            final clientName = companyNames[clientId] ?? 'Client inconnu';
-            projectsToSimulate.add({'id': id, 'name': name, 'clientName': clientName});
-          }
-        }
-      }
-
-      if (projectsToSimulate.isEmpty) {
-        throw 'Aucun projet actif trouvé pour la simulation.';
-      }
-
-      final buffer = StringBuffer();
-      buffer.writeln("=== RAPPORT DE SIMULATION MULTI-PROJETS BDC ===");
-      buffer.writeln("Nombre de projets simulés : ${projectsToSimulate.length}\n");
-
-      final holidaysRaw = await service.getHolidays(DateTime.now().year);
-      final List<DateTime> holidays = holidaysRaw.map((h) => DateTime.parse(h.toString())).toList();
-
-      for (var proj in projectsToSimulate) {
-        final projectId = proj['id'] as int;
-        final projectName = proj['name'] as String;
-        final clientName = proj['clientName'] as String;
-
-        final List<dynamic> deliveries = await service.getDeliveries(projectId);
-        
-        // On filtre pour ne garder que les prestations sous-traitées
-        final subcontractorDeliveries = deliveries.where((d) => 
-          d['relationships']?['purchase']?['data'] != null
-        ).toList();
-
-        if (subcontractorDeliveries.isEmpty) {
-          continue;
-        }
-
-        buffer.writeln("=================================================================");
-        buffer.writeln("PROJET : $projectName (ID: $projectId) | Client : $clientName");
-        buffer.writeln("=================================================================");
-
-        for (var delivery in subcontractorDeliveries) {
-          final delAttr = delivery['attributes'] ?? {};
-          final delId = delivery['id']?.toString() ?? 'unknown';
-          final delTitle = delAttr['title']?.toString() ?? 'Prestation sans titre';
-          final startDateStr = delAttr['startDate']?.toString();
-          final endDateStr = delAttr['endDate']?.toString();
-          
-          final dependsOn = delivery['relationships']?['dependsOn']?['data'];
-          final purchaseRel = delivery['relationships']?['purchase']?['data'];
-
-          buffer.writeln("\nPrestation : $delTitle (ID: $delId)");
-          buffer.writeln("Dates : $startDateStr au $endDateStr");
-
-          if (startDateStr == null || endDateStr == null) {
-            buffer.writeln("[Alerte] Dates de prestation manquantes.");
-            continue;
-          }
-
-          final startDate = DateTime.parse(startDateStr);
-          final endDate = DateTime.parse(endDateStr);
-
-          final double costsSimulated = double.tryParse(delAttr['costsSimulatedExcludingTax']?.toString() ?? '0') ?? 0;
-          final double totalQuantity = double.tryParse(delAttr['numberOfDaysInvoicedOrQuantity']?.toString() ?? '0') ?? 0;
-          double averageDailyCost = 0;
-          if (totalQuantity > 0) {
-            averageDailyCost = costsSimulated / totalQuantity;
-          }
-          buffer.writeln("TJM d'achat calculé : $averageDailyCost € HT");
-
-          String resourceName = "Inconnu";
-          if (dependsOn != null) {
-            final resId = int.tryParse(dependsOn['id']?.toString() ?? '');
-            if (resId != null) {
-              try {
-                final res = await service.getResource(resId);
-                final rAttr = res['attributes'] ?? {};
-                resourceName = "${rAttr['firstName'] ?? ''} ${rAttr['lastName'] ?? ''}".trim();
-              } catch (_) {}
-            }
-          }
-          buffer.writeln("Consultant : $resourceName");
-
-          String providerName = "Aucun";
-          String providerNum = "Aucun";
-          String providerAddr = "Inconnue";
-          String providerCity = "Inconnue";
-          final purchaseId = int.tryParse(purchaseRel['id']?.toString() ?? '');
-          if (purchaseId != null) {
-            try {
-              final purchase = await service.getPurchase(purchaseId);
-              final compRel = purchase['relationships']?['company']?['data'];
-              if (compRel != null) {
-                final compId = int.tryParse(compRel['id']?.toString() ?? '');
-                if (compId != null) {
-                  final company = await service.getCompanyInformation(compId);
-                  final cAttr = company['attributes'] ?? {};
-                  providerName = cAttr['name']?.toString() ?? 'Société sans nom';
-                  providerNum = compId.toString();
-                  providerAddr = cAttr['address']?.toString() ?? 'Non renseignée';
-                  final postcode = cAttr['postcode']?.toString() ?? '';
-                  final town = cAttr['town']?.toString() ?? '';
-                  final country = cAttr['country']?.toString() ?? '';
-                  providerCity = "$postcode $town $country".trim();
-                }
-              }
-            } catch (e) {
-              buffer.writeln("[Alerte] Erreur lors du chargement de l'achat/fournisseur : $e");
-            }
-          }
-          buffer.writeln("Fournisseur : $providerName (N° : $providerNum)");
-          buffer.writeln("Adresse : $providerAddr - $providerCity");
-
-          DateTime temp = DateTime(startDate.year, startDate.month, 1);
-          final endLimit = DateTime(endDate.year, endDate.month, 1);
-
-          buffer.writeln("Calcul des UO théoriques mobilisables par mois :");
-          while (temp.isBefore(endLimit) || temp.isAtSameMomentAs(endLimit)) {
-            final year = temp.year;
-            final month = temp.month;
-            final monthName = _getMonthName(month);
-
-            final firstOfMonth = DateTime(year, month, 1);
-            final lastOfMonth = DateTime(year, month + 1, 0);
-
-            int uoCount = 0;
-            if (startDate.isAfter(firstOfMonth) || endDate.isBefore(lastOfMonth)) {
-              final calcStart = startDate.isAfter(firstOfMonth) ? startDate : firstOfMonth;
-              final calcEnd = endDate.isBefore(lastOfMonth) ? endDate : lastOfMonth;
-              uoCount = _countWorkingDays(calcStart, calcEnd, holidays);
-              buffer.writeln(" - $monthName $year : $uoCount UO (Décompte partiel)");
-            } else {
-              uoCount = _countWorkingDays(firstOfMonth, lastOfMonth, holidays);
-              buffer.writeln(" - $monthName $year : $uoCount UO (Mois complet)");
-            }
-
-            final yearSuffix = year.toString().substring(2);
-            final monthSuffix = month.toString().padLeft(2, '0');
-            final bdcRef = "VIV-PO-$providerNum-$yearSuffix$monthSuffix";
-            final bdcMontant = uoCount * averageDailyCost;
-
-            buffer.writeln("   ➔ Réf BDC simulée : $bdcRef | Montant max : $bdcMontant € HT");
-
-            temp = DateTime(year, month + 1, 1);
-          }
-        }
-        buffer.writeln("\n");
-      }
-
-      final endTime = DateTime.now();
-      final duration = endTime.difference(startTime).inMilliseconds;
-
-      setState(() {
-        _isLoading = false;
-        _apiCallsCount++;
-        _statusText = "Simulation multi-projets réussie en $duration ms.";
-        _jsonResponse = buffer.toString();
-      });
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-        _statusText = "Erreur de simulation multi-projets :\n$e";
-        _jsonResponse = "";
-      });
-    }
-  }
-
-  String _getMonthName(int month) {
-    const months = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"];
-    return months[month - 1];
-  }
-
-  int _countWorkingDays(DateTime start, DateTime end, List<DateTime> holidays) {
-    int count = 0;
-    DateTime current = start;
-    while (current.isBefore(end) || current.isAtSameMomentAs(end)) {
-      if (current.weekday != DateTime.saturday && current.weekday != DateTime.sunday) {
-        final isHoliday = holidays.any((h) => h.year == current.year && h.month == current.month && h.day == current.day);
-        if (!isHoliday) {
-          count++;
-        }
-      }
-      current = current.add(const Duration(days: 1));
-    }
-    return count;
   }
 
   @override
@@ -601,10 +579,10 @@ class _BdcDiagnosticScreenState extends ConsumerState<BdcDiagnosticScreen> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text("Outil de Diagnostic API (Lecture Seule)", style: VivTypography.h3),
+              Text("Banc d'Essai & Diagnostic BDC (Lecture Seule)", style: VivTypography.h3),
               const SizedBox(height: 4),
               Text(
-                "Testez les requêtes optimisées vers BoondManager pour valider les inclusions relationnelles.",
+                "Validez la pagination, le filtrage par dates en amont et la complétude des données BDC (Approche A).",
                 style: VivTypography.small.copyWith(color: VivColors.gray500),
               ),
             ],
@@ -626,141 +604,155 @@ class _BdcDiagnosticScreenState extends ConsumerState<BdcDiagnosticScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text("FILTRES & PARAMÈTRES", style: VivTypography.eyebrow),
-          const SizedBox(height: VivSpacing.space4),
+          Text("PÉRIODE DU BANC D'ESSAI", style: VivTypography.eyebrow),
+          const SizedBox(height: VivSpacing.space3),
           
-          Text("ID Agence / ID Projet (Optionnel)", style: VivTypography.small.copyWith(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 6),
-          ShadInput(
-            placeholder: const Text("ex: 1 (Sert d'ID Projet pour l'appel Prestations)"),
-            onChanged: (val) => setState(() => _agencyId = val.trim()),
-          ),
-          
-          const SizedBox(height: VivSpacing.space6),
-          Text("INCLUSIONS RELATIONNELLES JSON:API", style: VivTypography.small.copyWith(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 6),
-          
-          ShadCheckbox(
-            value: _includeDeliveries,
-            onChanged: (val) => setState(() => _includeDeliveries = val),
-            label: const Text("Prestations (deliveries)"),
-          ),
-          const SizedBox(height: 4),
-          ShadCheckbox(
-            value: _includePurchase,
-            enabled: _includeDeliveries,
-            onChanged: (val) => setState(() => _includePurchase = val),
-            label: const Text("Achats sous-traitants (deliveries.purchase)"),
-          ),
-          const SizedBox(height: 4),
-          ShadCheckbox(
-            value: _includeCompany,
-            enabled: _includeDeliveries && _includePurchase,
-            onChanged: (val) => setState(() => _includeCompany = val),
-            label: const Text("Société Fournisseur (deliveries.purchase.company)"),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text("Mois", style: VivTypography.small.copyWith(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 4),
+                    ShadSelect<String>(
+                      initialValue: _selectedMonth,
+                      options: const [
+                        ShadOption(value: "01", child: Text("01 - Janvier")),
+                        ShadOption(value: "02", child: Text("02 - Février")),
+                        ShadOption(value: "03", child: Text("03 - Mars")),
+                        ShadOption(value: "04", child: Text("04 - Avril")),
+                        ShadOption(value: "05", child: Text("05 - Mai")),
+                        ShadOption(value: "06", child: Text("06 - Juin")),
+                        ShadOption(value: "07", child: Text("07 - Juillet")),
+                        ShadOption(value: "08", child: Text("08 - Août")),
+                        ShadOption(value: "09", child: Text("09 - Septembre")),
+                        ShadOption(value: "10", child: Text("10 - Octobre")),
+                        ShadOption(value: "11", child: Text("11 - Novembre")),
+                        ShadOption(value: "12", child: Text("12 - Décembre")),
+                      ],
+                      selectedOptionBuilder: (context, value) => Text(value),
+                      onChanged: (val) {
+                        if (val != null) setState(() => _selectedMonth = val);
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text("Année", style: VivTypography.small.copyWith(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 4),
+                    ShadSelect<String>(
+                      initialValue: _selectedYear,
+                      options: const [
+                        ShadOption(value: "2025", child: Text("2025")),
+                        ShadOption(value: "2026", child: Text("2026")),
+                        ShadOption(value: "2027", child: Text("2027")),
+                      ],
+                      selectedOptionBuilder: (context, value) => Text(value),
+                      onChanged: (val) {
+                        if (val != null) setState(() => _selectedYear = val);
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
 
-          const SizedBox(height: VivSpacing.space8),
-          Text("ACTIONS DE DIAGNOSTIC", style: VivTypography.eyebrow),
           const SizedBox(height: VivSpacing.space4),
+          Text("Plafond de pagination (Sécurité)", style: VivTypography.small.copyWith(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 4),
+          ShadSelect<int>(
+            initialValue: _maxPagesLimit,
+            options: const [
+              ShadOption(value: 50, child: Text("Sans limite (Tous les projets, max 50 pages)")),
+              ShadOption(value: 5, child: Text("Test rapide (Max 5 pages = ~250 projets)")),
+              ShadOption(value: 2, child: Text("Test ultra-court (Max 2 pages = ~100 projets)")),
+            ],
+            selectedOptionBuilder: (context, value) => Text(value == 50 ? "Tous les projets (max 50 pages)" : "Max $value pages"),
+            onChanged: (val) {
+              if (val != null) setState(() => _maxPagesLimit = val);
+            },
+          ),
+
+          const SizedBox(height: VivSpacing.space4),
+          Text("Filtre Agence Boond (Optionnel)", style: VivTypography.small.copyWith(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 4),
+          ShadInput(
+            placeholder: const Text("ex: 1 (Laissez vide pour toutes les agences)"),
+            onChanged: (val) => setState(() => _agencyId = val.trim()),
+          ),
+
+          const SizedBox(height: VivSpacing.space6),
+          Text("TEST PRINCIPAL RECOMMANDÉ", style: VivTypography.eyebrow),
+          const SizedBox(height: VivSpacing.space3),
           
           SizedBox(
             width: double.infinity,
+            height: 48,
             child: ShadButton(
               backgroundColor: VivColors.lime,
+              onPressed: _isLoading ? null : _runApprocheATest,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(LucideIcons.rocket, size: 18, color: VivColors.black),
+                  const SizedBox(width: 8),
+                  Text(
+                    "Lancer le Test Approche A",
+                    style: VivTypography.body.copyWith(fontWeight: FontWeight.bold, color: VivColors.black),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            "Exécute la détection paginée complète avec dates en amont, inclusions et audit exhaustif des champs BDC.",
+            style: VivTypography.small.copyWith(color: VivColors.gray500, fontSize: 12),
+          ),
+
+          const SizedBox(height: VivSpacing.space8),
+          Text("AUTRES TESTS UNITAIRES", style: VivTypography.eyebrow),
+          const SizedBox(height: VivSpacing.space3),
+
+          SizedBox(
+            width: double.infinity,
+            child: ShadButton.outline(
               onPressed: _isLoading ? null : _runProjectsTest,
               child: const Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(LucideIcons.play, size: 16),
+                  Icon(LucideIcons.play, size: 14),
                   SizedBox(width: 8),
-                  Text("Tester l'appel GET Projets"),
+                  Text("Tester appel brut GET /projects (Page 1)"),
                 ],
               ),
             ),
           ),
           const SizedBox(height: 8),
-          SizedBox(
-            width: double.infinity,
-            child: ShadButton(
-              backgroundColor: Colors.blueGrey,
-              onPressed: _isLoading ? null : _runPurchasesTest,
-              child: const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(LucideIcons.shoppingBag, size: 16),
-                  SizedBox(width: 8),
-                  Text("Tester l'appel GET Achats (Purchases)"),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          SizedBox(
-            width: double.infinity,
-            child: ShadButton(
-              backgroundColor: Colors.teal,
-              onPressed: _isLoading ? null : _runDeliveriesTest,
-              child: const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(LucideIcons.folderClosed, size: 16),
-                  SizedBox(width: 8),
-                  Text("Tester GET Prestations (Deliveries)"),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          SizedBox(
-            width: double.infinity,
-            child: ShadButton(
-              backgroundColor: Colors.blueAccent,
-              onPressed: _isLoading ? null : _runFullBdcSimulation,
-              child: const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(LucideIcons.binary, size: 16),
-                  SizedBox(width: 8),
-                  Text("Simuler flux complet BDC"),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text("Destinataire Email Test SMTP", style: VivTypography.small.copyWith(fontWeight: FontWeight.bold)),
+          Text("Test Envoi Email SMTP", style: VivTypography.small.copyWith(fontWeight: FontWeight.bold)),
           const SizedBox(height: 4),
           ShadInput(
-            placeholder: const Text("Destinataire (ex: votre@email.com)"),
+            placeholder: const Text("Destinataire test (ex: nom@domaine.com)"),
             onChanged: (val) => setState(() => _smtpTestRecipient = val.trim()),
           ),
           const SizedBox(height: 6),
           SizedBox(
             width: double.infinity,
-            child: ShadButton(
-              backgroundColor: Colors.indigo,
+            child: ShadButton.outline(
               onPressed: _isLoading ? null : _runSmtpTest,
               child: const Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(LucideIcons.mail, size: 16),
+                  Icon(LucideIcons.mail, size: 14),
                   SizedBox(width: 8),
-                  Text("Tester l'envoi SMTP (Étape 2)"),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          SizedBox(
-            width: double.infinity,
-            child: ShadButton.outline(
-              onPressed: _isLoading ? null : _runHolidaysTest,
-              child: const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(LucideIcons.calendarDays, size: 16),
-                  SizedBox(width: 8),
-                  Text("Tester l'appel Jours Fériés"),
+                  Text("Tester l'envoi SMTP"),
                 ],
               ),
             ),
@@ -777,7 +769,7 @@ class _BdcDiagnosticScreenState extends ConsumerState<BdcDiagnosticScreen> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text("STATUT & LOG DE RÉPONSE", style: VivTypography.eyebrow),
+            Text("STATUT & RÉSULTATS DU BANC D'ESSAI", style: VivTypography.eyebrow),
             Text("Appels API exécutés : $_apiCallsCount", style: VivTypography.small.copyWith(color: VivColors.gray500, fontWeight: FontWeight.bold)),
           ],
         ),
@@ -792,37 +784,158 @@ class _BdcDiagnosticScreenState extends ConsumerState<BdcDiagnosticScreen> {
           ),
           child: Text(
             _statusText,
-            style: const TextStyle(fontFamily: 'monospace', fontSize: 11, color: VivColors.black),
+            style: const TextStyle(fontFamily: 'monospace', fontSize: 11, color: VivColors.black, height: 1.4),
           ),
         ),
         const SizedBox(height: VivSpacing.space4),
-        Text("RÉPONSE JSON BRUTE", style: VivTypography.eyebrow),
-        const SizedBox(height: VivSpacing.space3),
-        Expanded(
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(VivSpacing.space4),
-            decoration: BoxDecoration(
-              color: const Color(0xFF1E1E1E),
-              borderRadius: BorderRadius.circular(VivSpacing.radiusMd),
-            ),
-            child: _isLoading
-                ? const Center(child: CircularProgressIndicator(color: VivColors.lime))
-                : _jsonResponse.isEmpty
-                    ? const Center(child: Text("Aucune donnée chargée.", style: TextStyle(color: Colors.white60, fontSize: 12)))
-                    : SingleChildScrollView(
-                        child: SelectableText(
-                          _jsonResponse,
-                          style: const TextStyle(
-                            fontFamily: 'monospace',
-                            fontSize: 10,
-                            color: Color(0xFF9CDCFE),
+        
+        if (_lastAuditReport != null) ...[
+          Text("TABLEAU DE CONTRÔLE DE COMPLÉTUDE (ÉCHANTILLON DÉTECTÉ)", style: VivTypography.eyebrow),
+          const SizedBox(height: VivSpacing.space2),
+          Expanded(
+            child: _buildAuditTable(_lastAuditReport!['prestas'] as List? ?? []),
+          ),
+        ] else ...[
+          Text("RÉPONSE BRUTE / LOG TECHNIQUE", style: VivTypography.eyebrow),
+          const SizedBox(height: VivSpacing.space3),
+          Expanded(
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(VivSpacing.space4),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1E1E1E),
+                borderRadius: BorderRadius.circular(VivSpacing.radiusMd),
+              ),
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator(color: VivColors.lime))
+                  : _jsonResponse.isEmpty
+                      ? const Center(child: Text("Cliquez sur 'Lancer le Test Approche A' pour exécuter le banc d'essai.", style: TextStyle(color: Colors.white60, fontSize: 12)))
+                      : SingleChildScrollView(
+                          child: SelectableText(
+                            _jsonResponse,
+                            style: const TextStyle(
+                              fontFamily: 'monospace',
+                              fontSize: 10,
+                              color: Color(0xFF9CDCFE),
+                            ),
                           ),
                         ),
-                      ),
+            ),
           ),
-        ),
+        ],
       ],
+    );
+  }
+
+  Widget _buildAuditTable(List<dynamic> prestas) {
+    if (prestas.isEmpty) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(VivSpacing.space4),
+        decoration: BoxDecoration(
+          color: VivColors.gray50,
+          borderRadius: BorderRadius.circular(VivSpacing.radiusMd),
+          border: Border.all(color: VivColors.gray200),
+        ),
+        child: const Center(child: Text("Aucune prestation sous-traitée trouvée pour cette période.")),
+      );
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(VivSpacing.radiusMd),
+        border: Border.all(color: VivColors.gray200),
+      ),
+      child: ListView.separated(
+        itemCount: prestas.length,
+        separatorBuilder: (context, index) => const Divider(height: 1),
+        itemBuilder: (context, index) {
+          final p = prestas[index] as Map<String, dynamic>;
+          final hasAlert = p['hasAlert'] == true;
+          final alertMessage = p['alertMessage']?.toString();
+
+          return Padding(
+            padding: const EdgeInsets.all(VivSpacing.space3),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: hasAlert ? Colors.amber.shade100 : Colors.green.shade100,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        hasAlert ? "⚠️ Alerte" : "✅ Complet",
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          color: hasAlert ? Colors.amber.shade900 : Colors.green.shade900,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        "${p['consultantName']} — ${p['title']}",
+                        style: VivTypography.small.copyWith(fontWeight: FontWeight.bold),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    Text(
+                      "${(p['totalHt'] as double? ?? 0).toStringAsFixed(0)} € HT (${p['uoCount']} UO @ ${p['tjmAchat']} €)",
+                      style: VivTypography.small.copyWith(fontWeight: FontWeight.bold, color: VivColors.black),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        "🏢 Fournisseur : ${p['providerName']} (${p['providerPostcode']} ${p['providerTown']})",
+                        style: VivTypography.small.copyWith(color: VivColors.ink700, fontSize: 12),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    Expanded(
+                      child: Text(
+                        "✉️ Contact : ${p['contactName']} <${p['contactEmail']}>",
+                        style: VivTypography.small.copyWith(color: VivColors.ink700, fontSize: 12),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  "📁 Projet : ${p['projectName']} | Client : ${p['clientName']} | Dates : ${p['startDate'] ?? 'N/A'} au ${p['endDate'] ?? 'N/A'}",
+                  style: VivTypography.small.copyWith(color: VivColors.gray500, fontSize: 11),
+                ),
+                if (hasAlert && alertMessage != null) ...[
+                  const SizedBox(height: 4),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.shade50,
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: Colors.amber.shade200),
+                    ),
+                    child: Text(
+                      "Motif de l'alerte : $alertMessage",
+                      style: TextStyle(fontSize: 10, color: Colors.amber.shade900),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          );
+        },
+      ),
     );
   }
 
@@ -837,8 +950,15 @@ class _BdcDiagnosticScreenState extends ConsumerState<BdcDiagnosticScreen> {
         ),
       ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.end,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
+          if (_lastAuditReport != null)
+            Text(
+              "Résultats : ${_lastAuditReport!['summary']['totalPrestasDetected']} prestations détectées (${_lastAuditReport!['summary']['distinctProvidersCount']} fournisseurs)",
+              style: VivTypography.small.copyWith(fontWeight: FontWeight.bold),
+            )
+          else
+            const SizedBox.shrink(),
           ShadButton.outline(
             onPressed: widget.onClose,
             child: const Text("Fermer"),
@@ -847,4 +967,12 @@ class _BdcDiagnosticScreenState extends ConsumerState<BdcDiagnosticScreen> {
       ),
     );
   }
+}
+
+double _parseTjm(dynamic value) {
+  if (value == null) return 0;
+  final cleanString = value.toString()
+      .replaceAll(',', '.')
+      .replaceAll(RegExp(r'[^0-9.-]'), '');
+  return double.tryParse(cleanString) ?? 0;
 }
