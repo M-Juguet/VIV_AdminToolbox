@@ -11,8 +11,10 @@ class EmailService {
     required String to,
     required String subject,
     required String body,
+    String? htmlBody,
     List<String> bcc = const [],
     List<File> attachments = const [],
+    List<Attachment> inlineAttachments = const [],
   }) async {
     final host = settings.smtpHost;
     final port = settings.smtpPort;
@@ -35,10 +37,14 @@ class EmailService {
 
     // Construction du message
     final message = Message()
-      ..from = Address(user, 'VIV Administrateur')
+      ..from = Address(user, 'VIV Relations Fournisseurs')
       ..recipients.add(to)
       ..subject = subject
       ..text = body;
+
+    if (htmlBody != null && htmlBody.isNotEmpty) {
+      message.html = htmlBody;
+    }
 
     // Ajout éventuel des destinataires en copie conforme invisible (Bcc)
     if (bcc.isNotEmpty) {
@@ -49,13 +55,18 @@ class EmailService {
       }
     }
 
-    // Ajout éventuel des pièces jointes
+    // Ajout éventuel des pièces jointes standard
     if (attachments.isNotEmpty) {
       for (var file in attachments) {
         if (file.existsSync()) {
           message.attachments.add(FileAttachment(file));
         }
       }
+    }
+
+    // Ajout éventuel des pièces jointes inline (images de signature cid)
+    if (inlineAttachments.isNotEmpty) {
+      message.attachments.addAll(inlineAttachments);
     }
 
     try {

@@ -66,13 +66,13 @@ class UpdateService {
 
   Future<void> installUpdate(String exePath) async {
     try {
-      // Exécute le .exe et détache le processus de l'application Flutter
+      // Exécute le .exe avec arguments Inno Setup pour écrasement propre et redémarrage
       await Process.start(
         exePath,
-        [],
+        ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'],
         mode: ProcessStartMode.detached,
       );
-      // Fermeture de l'application
+      // Fermeture immédiate de l'application pour libérer les fichiers
       exit(0);
     } catch (e) {
       debugPrint("Erreur lors du lancement de l'installeur : $e");

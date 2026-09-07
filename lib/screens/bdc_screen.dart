@@ -1,9 +1,11 @@
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:printing/printing.dart';
+import 'package:mailer/mailer.dart' show FileAttachment;
 import '../design_system/viv_colors.dart';
 import '../design_system/viv_spacing.dart';
 import '../design_system/viv_typography.dart';
@@ -1231,8 +1233,128 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
     _sendMailSequential(0);
   }
 
-  void _sendMailSequential(int index) {
+  /// Construit le corps HTML du mail envoyé au fournisseur avec stylisation précise
+  String _buildBdcEmailHtml({
+    required String contactFirstName,
+    required String bdcNumber,
+  }) {
+    return '''
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    color: #333333;
+    margin: 0;
+    padding: 0;
+  }
+  p {
+    margin: 0 0 14px 0;
+  }
+  ol {
+    margin: 0 0 16px 0;
+    padding-left: 20px;
+  }
+  li {
+    margin-bottom: 12px;
+  }
+  .bold-title {
+    font-weight: bold;
+    display: block;
+    margin-bottom: 3px;
+  }
+  .conditions {
+    font-style: italic;
+    margin-top: 18px;
+    margin-bottom: 18px;
+    line-height: 1.5;
+  }
+  .signature-img {
+    display: block;
+    max-width: 480px;
+    height: auto;
+    margin-top: 10px;
+    border: none;
+  }
+</style>
+</head>
+<body>
+  <p>Bonjour <em>$contactFirstName</em>,</p>
+
+  <p>Conformément au contrat de prestation qui nous lie, vous trouverez en pièce jointe le <strong>bon de commande $bdcNumber</strong>.</p>
+
+  <p>Pour rappel, notre processus de facturation se déroule comme suit :</p>
+
+  <ol>
+    <li>
+      <strong>Bon de commande</strong><br>
+      En début de chaque mois, nous vous adressons un bon de commande précisant le montant prévisionnel des prestations à réaliser pour le mois concerné, à nous retourner signé.
+    </li>
+    <li>
+      <strong>Rapport de production</strong><br>
+      Une fois votre feuille de temps validée dans <strong>BOOND</strong>, vous recevez un rapport de production indiquant le montant réel des prestations effectuées sur le mois.
+    </li>
+    <li>
+      <strong>Dépôt de votre facture</strong><br>
+      Vous pouvez ensuite déposer votre facture directement dans votre espace <strong>BOOND</strong>, via l’onglet « <strong>Mes factures</strong> ».<br>
+      Lors du dépôt, merci de veiller à renseigner correctement, dans la section « <strong>Informations générales</strong> », les dates de <strong>début</strong> et de <strong>fin de la période facturée</strong>.
+    </li>
+  </ol>
+
+  <p class="conditions">
+    <u>Conditions de règlement</u> :<br>
+    Pour bénéficier d’un règlement à <strong>40 jours</strong>, votre facture doit être déposée <strong>avant le 25 du mois suivant la période facturée (M+1)</strong>. À défaut, le règlement sera automatiquement reporté de <strong>30 jours supplémentaires</strong>.<br>
+    Echéance de paiement : règlement à <strong>30 jours</strong>, le <strong>10 du mois suivant (M+2)</strong>.
+  </p>
+
+  <p>
+    Nous restons à votre disposition pour toute question ou complément d’information.<br>
+    Merci par avance pour votre retour.
+  </p>
+
+  <p>Cordialement,</p>
+
+  <p>
+    <img src="cid:signature_viv" alt="Relations Fournisseurs VIV" width="480" style="display: block; width: 480px; max-width: 100%; height: auto; margin-top: 10px; border: none;" />
+  </p>
+</body>
+</html>
+''';
+  }
+
+  /// Construit le corps brut (fallback texte alternatif)
+  String _buildBdcEmailPlainText({
+    required String contactFirstName,
+    required String bdcNumber,
+  }) {
+    return "Bonjour $contactFirstName,\n\n"
+        "Conformément au contrat de prestation qui nous lie, vous trouverez en pièce jointe le bon de commande $bdcNumber.\n\n"
+        "Pour rappel, notre processus de facturation se déroule comme suit :\n\n"
+        "1 - Bon de commande\n"
+        "En début de chaque mois, nous vous adressons un bon de commande précisant le montant prévisionnel des prestations à réaliser pour le mois concerné, à nous retourner signé.\n\n"
+        "2 - Rapport de production\n"
+        "Une fois votre feuille de temps validée dans BOOND, vous recevez un rapport de production indiquant le montant réel des prestations effectuées sur le mois.\n\n"
+        "3 - Dépôt de votre facture\n"
+        "Vous pouvez ensuite déposer votre facture directement dans votre espace BOOND, via l’onglet « Mes factures ».\n"
+        "Lors du dépôt, merci de veiller à renseigner correctement, dans la section « Informations générales », les dates de début et de fin de la période facturée.\n\n\n"
+        "Conditions de règlement :\n"
+        "Pour bénéficier d’un règlement à 40 jours, votre facture doit être déposée avant le 25 du mois suivant la période facturée (M+1). À défaut, le règlement sera automatiquement reporté de 30 jours supplémentaires.\n"
+        "Echéance de paiement : règlement à 30 jours, le 10 du mois suivant (M+2).\n\n"
+        "Nous restons à votre disposition pour toute question ou complément d’information.\n"
+        "Merci par avance pour votre retour.\n\n"
+        "Cordialement,\n\n"
+        "Relations Fournisseurs VIV\n"
+        "14 rue de Mantes 92700 - Colombes\n"
+        "fournisseurs@viv-prod.com | www.viv-prod.com";
+  }
+
+  void _sendMailSequential(int index) async {
     if (index >= _smtpStatusList.length) {
+      if (!mounted) return;
       setState(() {
         _isSendingMails = false;
       });
@@ -1280,8 +1402,11 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
         if (!mounted) return;
         
         try {
+          final String yearSuffix = _selectedYear.substring(_selectedYear.length - 2);
+          final String bdcNumber = "VIV-PO-CSOC$providerId-$yearSuffix$_selectedMonth";
+
           final tempDir = await getTemporaryDirectory();
-          final tempFile = File(p.join(tempDir.path, "BDC_CSOC${providerId}_$_selectedYear$_selectedMonth.pdf"));
+          final tempFile = File(p.join(tempDir.path, "$bdcNumber.pdf"));
           await tempFile.writeAsBytes(pdfBytes!);
 
           final settings = ref.read(settingsProvider);
@@ -1306,38 +1431,34 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
             }
           } catch (_) {}
 
-          final String bdcNumber = "VIV-PO-CSOC$providerId-${_selectedYear.substring(_selectedYear.length - 2)}$_selectedMonth";
           final consultantNamesList = providerPrestas.map((x) => x.consultantName).join(', ');
 
-          // 1. Envoyer le mail avec pièce jointe
+          // Charger l'image de la signature depuis les assets et l'embarquer en inline CID
+          final sigData = await rootBundle.load('assets/images/signature_relation_fournisseurs_viv.png');
+          final sigFile = File(p.join(tempDir.path, "signature_relation_fournisseurs_viv.png"));
+          await sigFile.writeAsBytes(sigData.buffer.asUint8List());
+
+          final sigAttachment = FileAttachment(sigFile)
+            ..cid = '<signature_viv>'
+            ..fileName = 'signature_relation_fournisseurs_viv.png'
+            ..contentType = 'image/png';
+
+          // 1. Envoyer le mail stylisé en HTML avec pièce jointe PDF et signature
           await emailService.sendEmail(
             settings: settings,
             to: item.email,
             subject: "Votre bon de commande_$monthLabel $_selectedYear",
-            body: "Bonjour $contactFirstName,\n\n"
-                  "Conformément au contrat de prestation qui nous lie, vous trouverez en pièce jointe le bon de commande $bdcNumber.\n\n"
-                  "Pour rappel, notre processus de facturation se déroule comme suit :\n\n"
-                  "1 - Bon de commande\n"
-                  "En début de chaque mois, nous vous adressons un bon de commande précisant le montant prévisionnel des prestations à réaliser pour le mois concerné, à nous retourner signé.\n\n"
-                  "2 - Rapport de production\n"
-                  "Une fois votre feuille de temps validée dans BOOND, vous recevez un rapport de production indiquant le montant réel des prestations effectuées sur le mois.\n\n"
-                  "3 - Dépôt de votre facture\n"
-                  "Vous pouvez ensuite déposer votre facture directement dans votre espace BOOND, via l’onglet « Mes factures ».\n"
-                  "Lors du dépôt, merci de veiller à renseigner correctement, dans la section « Informations générales », les dates de début et de fin de la période facturée.\n\n\n"
-                  "Conditions de règlement :\n"
-                  "Pour bénéficier d’un règlement à 40 jours, votre facture doit être déposée avant le 25 du mois suivant la période facturée (M+1). À défaut, le règlement sera automatiquement reporté de 30 jours supplémentaires.\n"
-                  "Echéance de paiement : règlement à 30 jours, le 10 du mois suivant (M+2).\n\n"
-                  "Nous restons à votre disposition pour toute question ou complément d’information.\n"
-                  "Merci par avance pour votre retour.\n\n"
-                  "Cordialement,\n\n"
-                  "L'équipe Opsis",
+            body: _buildBdcEmailPlainText(contactFirstName: contactFirstName, bdcNumber: bdcNumber),
+            htmlBody: _buildBdcEmailHtml(contactFirstName: contactFirstName, bdcNumber: bdcNumber),
             attachments: [tempFile],
+            inlineAttachments: [sigAttachment],
             bcc: [settings.smtpUser], // Copie conforme à l'expéditeur
           );
 
-          // Supprimer le fichier temporaire
+          // Supprimer les fichiers temporaires
           try {
             await tempFile.delete();
+            await sigFile.delete();
           } catch (_) {}
 
           // 2. Sauvegarder dans Sembast + disque physique local
@@ -1410,8 +1531,11 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
             item.status = 'sending';
           });
           
+          final String yearSuffix = _selectedYear.substring(_selectedYear.length - 2);
+          final String bdcNumber = "VIV-PO-CSOC$providerId-$yearSuffix$_selectedMonth";
+
           final tempDir = await getTemporaryDirectory();
-          final tempFile = File(p.join(tempDir.path, "BDC_CSOC${providerId}_$_selectedYear$_selectedMonth.pdf"));
+          final tempFile = File(p.join(tempDir.path, "$bdcNumber.pdf"));
           await tempFile.writeAsBytes(pdfBytes);
 
           final monthsFrench = {
@@ -1430,38 +1554,34 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
             }
           } catch (_) {}
 
-          final String bdcNumber = "VIV-PO-CSOC$providerId-${_selectedYear.substring(_selectedYear.length - 2)}$_selectedMonth";
           final consultantNamesList = providerPrestas.map((x) => x.consultantName).join(', ');
 
-          // 1. Envoyer le mail réel
+          // Charger l'image de la signature depuis les assets et l'embarquer en inline CID
+          final sigData = await rootBundle.load('assets/images/signature_relation_fournisseurs_viv.png');
+          final sigFile = File(p.join(tempDir.path, "signature_relation_fournisseurs_viv_$providerId.png"));
+          await sigFile.writeAsBytes(sigData.buffer.asUint8List());
+
+          final sigAttachment = FileAttachment(sigFile)
+            ..cid = '<signature_viv>'
+            ..fileName = 'signature_relation_fournisseurs_viv.png'
+            ..contentType = 'image/png';
+
+          // 1. Envoyer le mail réel stylisé en HTML
           await emailService.sendEmail(
             settings: settings,
             to: item.email,
             subject: "Votre bon de commande_$monthLabel $_selectedYear",
-            body: "Bonjour $contactFirstName,\n\n"
-                  "Conformément au contrat de prestation qui nous lie, vous trouverez en pièce jointe le bon de commande $bdcNumber.\n\n"
-                  "Pour rappel, notre processus de facturation se déroule comme suit :\n\n"
-                  "1 - Bon de commande\n"
-                  "En début de chaque mois, nous vous adressons un bon de commande précisant le montant prévisionnel des prestations à réaliser pour le mois concerné, à nous retourner signé.\n\n"
-                  "2 - Rapport de production\n"
-                  "Une fois votre feuille de temps validée dans BOOND, vous recevez un rapport de production indiquant le montant réel des prestations effectuées sur le mois.\n\n"
-                  "3 - Dépôt de votre facture\n"
-                  "Vous pouvez ensuite déposer votre facture directement dans votre espace BOOND, via l’onglet « Mes factures ».\n"
-                  "Lors du dépôt, merci de veiller à renseigner correctement, dans la section « Informations générales », les dates de début et de fin de la période facturée.\n\n\n"
-                  "Conditions de règlement :\n"
-                  "Pour bénéficier d’un règlement à 40 jours, votre facture doit être déposée avant le 25 du mois suivant la période facturée (M+1). À défaut, le règlement sera automatiquement reporté de 30 jours supplémentaires.\n"
-                  "Echéance de paiement : règlement à 30 jours, le 10 du mois suivant (M+2).\n\n"
-                  "Nous restons à votre disposition pour toute question ou complément d’information.\n"
-                  "Merci par avance pour votre retour.\n\n"
-                  "Cordialement,\n\n"
-                  "L'équipe Opsis",
+            body: _buildBdcEmailPlainText(contactFirstName: contactFirstName, bdcNumber: bdcNumber),
+            htmlBody: _buildBdcEmailHtml(contactFirstName: contactFirstName, bdcNumber: bdcNumber),
             attachments: [tempFile],
+            inlineAttachments: [sigAttachment],
             bcc: [settings.smtpUser], // Copie conforme à l'expéditeur
           );
 
-          // Supprimer le fichier temporaire
+          // Supprimer les fichiers temporaires
           try {
             await tempFile.delete();
+            await sigFile.delete();
           } catch (_) {}
 
           // 2. Sauvegarder dans Sembast + disque physique local
@@ -2742,7 +2862,8 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
     try {
       final providerPrestas = _step2Calculated.where((x) => x.providerId == item.providerId).toList();
       final bytes = await BdcPdfService.generateBdcPdf(providerPrestas, _selectedMonth, _selectedYear);
-      final filename = 'BDC_CSOC${item.providerId}_$_selectedYear$_selectedMonth.pdf';
+      final yearSuffix = _selectedYear.substring(_selectedYear.length - 2);
+      final filename = 'VIV-PO-CSOC${item.providerId}-$yearSuffix$_selectedMonth.pdf';
       await Printing.sharePdf(bytes: bytes, filename: filename);
       
       if (mounted) {

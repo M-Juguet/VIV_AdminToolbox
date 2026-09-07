@@ -61,6 +61,9 @@ class BdcPdfService {
     // Charger l'image du badge Ecovadis de manière robuste (CPU-only)
     final ecovadisImage = await _loadRobustImage('assets/images/ecovadis-or-2024.png');
 
+    // Charger l'image du tampon de l'entreprise de manière robuste (CPU-only)
+    final tamponImage = await _loadRobustImage('assets/images/tampon.png');
+
     pdf.addPage(
       pw.Page(
         pageFormat: PdfPageFormat.a4,
@@ -73,18 +76,18 @@ class BdcPdfService {
               // 1. BANDEAU EN-TÊTE NOIR (Logo à gauche, Date à droite)
               pw.Container(
                 color: PdfColor.fromHex('#000000'),
-                padding: const pw.EdgeInsets.symmetric(horizontal: 36, vertical: 16),
+                padding: const pw.EdgeInsets.symmetric(horizontal: 36, vertical: 10),
                 child: pw.Row(
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
                     if (logoImage != null)
-                      pw.Image(logoImage, height: 32, fit: pw.BoxFit.contain)
+                      pw.Image(logoImage, height: 28, fit: pw.BoxFit.contain)
                     else
                       pw.Text(
                         "VIV",
                         style: pw.TextStyle(
                           color: PdfColors.white,
-                          fontSize: 22,
+                          fontSize: 20,
                           fontWeight: pw.FontWeight.bold,
                         ),
                       ),
@@ -92,7 +95,7 @@ class BdcPdfService {
                       "Le $todayDate",
                       style: pw.TextStyle(
                         color: PdfColors.white,
-                        fontSize: 10,
+                        fontSize: 9.5,
                         fontWeight: pw.FontWeight.bold,
                       ),
                     ),
@@ -102,14 +105,14 @@ class BdcPdfService {
 
               // Bandeau de dégradé/ligne verte sous l'en-tête
               pw.Container(
-                height: 4,
+                height: 3,
                 color: PdfColor.fromHex('#A3E635'), // Couleur verte de Viv
               ),
 
-              // Corps du PDF avec marges intérieures de 36
+              // Corps du PDF avec marges intérieures compactes
               pw.Expanded(
                 child: pw.Padding(
-                  padding: const pw.EdgeInsets.fromLTRB(36, 20, 36, 24),
+                  padding: const pw.EdgeInsets.fromLTRB(36, 12, 36, 14),
                   child: pw.Column(
                     crossAxisAlignment: pw.CrossAxisAlignment.start,
                     children: [
@@ -123,14 +126,14 @@ class BdcPdfService {
                                 text: "Bon de commande ",
                                 style: pw.TextStyle(
                                   font: playfairFont,
-                                  fontSize: 18,
+                                  fontSize: 16,
                                   color: PdfColors.black,
                                 ),
                               ),
                               pw.TextSpan(
                                 text: "N° $bdcNumber",
                                 style: pw.TextStyle(
-                                  fontSize: 18,
+                                  fontSize: 16,
                                   fontWeight: pw.FontWeight.bold,
                                   color: PdfColors.black,
                                 ),
@@ -139,17 +142,17 @@ class BdcPdfService {
                           ),
                         ),
                       ),
-                      pw.SizedBox(height: 20),
+                      pw.SizedBox(height: 10),
 
-                      // 3. BLOCS D'ADRESSES CÔTE À CÔTE
+                      // 3. BLOCS D'ADRESSES CÔTE À CÔTE (Hauteur fixe identique pour les deux blocs)
                       pw.Row(
                         crossAxisAlignment: pw.CrossAxisAlignment.start,
                         children: [
                           // Adresse de Facturation (Gauche)
                           pw.Expanded(
                             child: pw.Container(
-                              padding: const pw.EdgeInsets.all(10),
-                              height: 120,
+                              height: 98,
+                              padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                               decoration: pw.BoxDecoration(
                                 border: pw.Border.all(color: PdfColors.black, width: 1),
                               ),
@@ -160,27 +163,27 @@ class BdcPdfService {
                                     "Adresse de facturation :",
                                     style: pw.TextStyle(
                                       fontWeight: pw.FontWeight.bold,
-                                      fontSize: 10,
+                                      fontSize: 9,
                                       decoration: pw.TextDecoration.underline,
                                     ),
                                   ),
-                                  pw.SizedBox(height: 6),
-                                  pw.Text("VIV", style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9)),
-                                  pw.Text("Service Comptabilité Fournisseurs", style: pw.TextStyle(fontSize: 9)),
-                                  pw.Text("14 rue de Mantes", style: pw.TextStyle(fontSize: 9)),
-                                  pw.Text("92700 Colombes", style: pw.TextStyle(fontSize: 9)),
-                                  pw.Text("France", style: pw.TextStyle(fontSize: 9)),
-                                  pw.Text("TVA FR89811694215", style: pw.TextStyle(fontSize: 9)),
+                                  pw.SizedBox(height: 3),
+                                  pw.Text("VIV", style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8)),
+                                  pw.Text("Service Comptabilité Fournisseurs", style: pw.TextStyle(fontSize: 8)),
+                                  pw.Text("14 rue de Mantes", style: pw.TextStyle(fontSize: 8)),
+                                  pw.Text("92700 Colombes", style: pw.TextStyle(fontSize: 8)),
+                                  pw.Text("France", style: pw.TextStyle(fontSize: 8)),
+                                  pw.Text("TVA FR89811694215", style: pw.TextStyle(fontSize: 8)),
                                 ],
                               ),
                             ),
                           ),
-                          pw.SizedBox(width: 16),
+                          pw.SizedBox(width: 14),
                           // Réf. Contrat Fournisseur (Droite)
                           pw.Expanded(
                             child: pw.Container(
-                              padding: const pw.EdgeInsets.all(10),
-                              height: 120,
+                              height: 98,
+                              padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                               decoration: pw.BoxDecoration(
                                 border: pw.Border.all(color: PdfColors.black, width: 1),
                               ),
@@ -191,27 +194,27 @@ class BdcPdfService {
                                     "Réf. Contrat fournisseur : $periodYear-CSOC${firstPresta.providerId}",
                                     style: pw.TextStyle(
                                       fontWeight: pw.FontWeight.bold,
-                                      fontSize: 10,
+                                      fontSize: 9,
                                       decoration: pw.TextDecoration.underline,
                                     ),
                                   ),
-                                  pw.SizedBox(height: 6),
-                                  pw.Text(firstPresta.providerName, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9)),
-                                  pw.Text(firstPresta.providerAddress, style: pw.TextStyle(fontSize: 9)),
-                                  pw.Text("${firstPresta.providerPostcode} ${firstPresta.providerTown}", style: pw.TextStyle(fontSize: 9)),
-                                  pw.Text(firstPresta.providerCountry, style: pw.TextStyle(fontSize: 9)),
+                                  pw.SizedBox(height: 3),
+                                  pw.Text(firstPresta.providerName, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8)),
+                                  pw.Text(firstPresta.providerAddress, style: pw.TextStyle(fontSize: 8)),
+                                  pw.Text("${firstPresta.providerPostcode} ${firstPresta.providerTown}", style: pw.TextStyle(fontSize: 8)),
+                                  pw.Text(firstPresta.providerCountry, style: pw.TextStyle(fontSize: 8)),
                                 ],
                               ),
                             ),
                           ),
                         ],
                       ),
-                      pw.SizedBox(height: 20),
+                      pw.SizedBox(height: 15),
 
                       // 4. RÉFÉRENCES À RAPPELER
                       pw.RichText(
                         text: pw.TextSpan(
-                          style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold, color: PdfColors.black),
+                          style: pw.TextStyle(fontSize: 8.5, fontWeight: pw.FontWeight.bold, color: PdfColors.black),
                           children: [
                             const pw.TextSpan(text: "Références à rappeler "),
                             pw.TextSpan(
@@ -225,11 +228,11 @@ class BdcPdfService {
                       pw.SizedBox(height: 2),
                       pw.Row(
                         children: [
-                          pw.Text("N° du Bon de commande : ", style: pw.TextStyle(fontSize: 9)),
-                          pw.Text(bdcNumber, style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+                          pw.Text("N° du Bon de commande : ", style: pw.TextStyle(fontSize: 8.5)),
+                          pw.Text(bdcNumber, style: pw.TextStyle(fontSize: 8.5, fontWeight: pw.FontWeight.bold)),
                         ],
                       ),
-                      pw.SizedBox(height: 12),
+                      pw.SizedBox(height: 15),
 
                       // 5. TABLEAU DES PRESTATIONS
                       pw.Table(
@@ -267,13 +270,13 @@ class BdcPdfService {
                           )),
                         ],
                       ),
-                      pw.SizedBox(height: 16),
+                      pw.SizedBox(height: 10),
 
                       // 6. TOTALISATEURS (UO et Montants maximums)
                       pw.Align(
                         alignment: pw.Alignment.centerRight,
                         child: pw.Container(
-                          width: 320, // Alignement à droite impeccable des valeurs
+                          width: 320, // Alignement à droite dynamique et lisible
                           child: pw.Column(
                             crossAxisAlignment: pw.CrossAxisAlignment.end,
                             children: [
@@ -282,25 +285,25 @@ class BdcPdfService {
                                 children: [
                                   pw.Text(
                                     "Nombre maximum d'UO autorisé",
-                                    style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
+                                    style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
                                   ),
                                   pw.Text(
                                     prestas.fold<double>(0, (sum, p) => sum + p.uoCount).toStringAsFixed(2),
-                                    style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
+                                    style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
                                   ),
                                 ],
                               ),
-                              pw.SizedBox(height: 4),
+                              pw.SizedBox(height: 3),
                               pw.Row(
                                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                                 children: [
                                   pw.Text(
                                     "Montant maximum HT EUR (non engageant)",
-                                    style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
+                                    style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
                                   ),
                                   pw.Text(
                                     "${prestas.fold<double>(0, (sum, p) => sum + p.totalHt).toStringAsFixed(2)} €",
-                                    style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
+                                    style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
                                   ),
                                 ],
                               ),
@@ -308,7 +311,7 @@ class BdcPdfService {
                           ),
                         ),
                       ),
-                      pw.SizedBox(height: 24),
+                      pw.SizedBox(height: 16),
 
                       // 7. CONDITIONS DE PRESTATION (Mentions légales en petits caractères)
                       pw.Text(
@@ -316,9 +319,9 @@ class BdcPdfService {
                         "Seules les unités d'œuvre (UO) réellement effectuées et validées par l'émission par VIV d'un Rapport de production pourront être facturées forfaitairement par le Prestataire.\n\n"
                         "Les frais de déplacement ne pourront être refacturés que sur présentation de justificatifs et sous réserve de validation par VIV. Ils devront faire l'objet d'une facture dédiée.\n\n"
                         "Toutes vos factures devront être déposées dans notre outil de gestion BoondManager ; dans la rubrique « mes factures » (cf : Livret d'accueil). Les factures sont payables par virement bancaire à trente (30) jours à la date d'émission de la facture, le dix (10) du mois suivant.",
-                        style: pw.TextStyle(fontSize: 7.5, fontStyle: pw.FontStyle.italic),
+                        style: pw.TextStyle(fontSize: 6.8, fontStyle: pw.FontStyle.italic, lineSpacing: 1.1),
                       ),
-                      pw.SizedBox(height: 36),
+                      pw.SizedBox(height: 18),
 
                       // 8. SIGNATURES (Tableau 2x2 centré sans bordure)
                       pw.Table(
@@ -334,14 +337,14 @@ class BdcPdfService {
                                 alignment: pw.Alignment.center,
                                 child: pw.Text(
                                   "Le Prestataire :",
-                                  style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10),
+                                  style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9.5),
                                 ),
                               ),
                               pw.Container(
                                 alignment: pw.Alignment.center,
                                 child: pw.Text(
                                   "VIV :",
-                                  style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10),
+                                  style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9.5),
                                 ),
                               ),
                             ],
@@ -350,32 +353,39 @@ class BdcPdfService {
                             children: [
                               pw.Container(
                                 alignment: pw.Alignment.center,
-                                padding: const pw.EdgeInsets.only(top: 8),
+                                padding: const pw.EdgeInsets.only(top: 4),
                                 child: pw.Text(
                                   "Valant Acceptation de cette commande",
-                                  style: pw.TextStyle(fontStyle: pw.FontStyle.italic, fontSize: 9),
+                                  style: pw.TextStyle(fontStyle: pw.FontStyle.italic, fontSize: 8.5),
                                 ),
                               ),
                               pw.Container(
                                 alignment: pw.Alignment.center,
-                                padding: const pw.EdgeInsets.only(top: 8),
-                                child: pw.Container(
-                                  width: 140,
-                                  height: 50,
-                                  decoration: pw.BoxDecoration(
-                                    border: pw.Border.all(color: PdfColor.fromHex('#EF4444'), width: 1.5),
-                                  ),
-                                  alignment: pw.Alignment.center,
-                                  child: pw.Text(
-                                    "[ Tampon de l'entreprise ]\n[ Confidentiel ]",
-                                    textAlign: pw.TextAlign.center,
-                                    style: pw.TextStyle(
-                                      color: PdfColor.fromHex('#EF4444'),
-                                      fontSize: 8,
-                                      fontWeight: pw.FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
+                                padding: const pw.EdgeInsets.only(top: 4),
+                                child: tamponImage != null
+                                    ? pw.Image(
+                                        tamponImage,
+                                        width: 125,
+                                        height: 50,
+                                        fit: pw.BoxFit.contain,
+                                      )
+                                    : pw.Container(
+                                        width: 125,
+                                        height: 45,
+                                        decoration: pw.BoxDecoration(
+                                          border: pw.Border.all(color: PdfColor.fromHex('#EF4444'), width: 1.5),
+                                        ),
+                                        alignment: pw.Alignment.center,
+                                        child: pw.Text(
+                                          "[ Tampon de l'entreprise ]\n[ Confidentiel ]",
+                                          textAlign: pw.TextAlign.center,
+                                          style: pw.TextStyle(
+                                            color: PdfColor.fromHex('#EF4444'),
+                                            fontSize: 8,
+                                            fontWeight: pw.FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
                               ),
                             ],
                           ),
@@ -385,7 +395,7 @@ class BdcPdfService {
                       pw.Spacer(),
 
                       // 9. PIED DE PAGE (Ligne séparatrice retirée, Infos légales de VIV avec lien email et badge EcoVadis réel)
-                      pw.SizedBox(height: 4),
+                      pw.SizedBox(height: 2),
                       pw.Row(
                         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                         crossAxisAlignment: pw.CrossAxisAlignment.end,
@@ -397,30 +407,30 @@ class BdcPdfService {
                               children: [
                                 pw.Text(
                                   "VIV",
-                                  style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9),
+                                  style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8.5),
                                 ),
                                 pw.Text(
                                   "Siège Social : 14 rue de Mantes - Immeuble Le Charlebourg - 92700 COLOMBES",
-                                  style: pw.TextStyle(fontSize: 7.5, color: PdfColors.grey700),
+                                  style: pw.TextStyle(fontSize: 7, color: PdfColors.grey700),
                                 ),
                                 pw.Text(
                                   "SAS au capital de 100 000 euros - RCS NANTERRE - SIREN : 811.694.215 - TVA FR89811694215 - NAF : 7410Z",
-                                  style: pw.TextStyle(fontSize: 7.5, color: PdfColors.grey700),
+                                  style: pw.TextStyle(fontSize: 7, color: PdfColors.grey700),
                                 ),
-                                pw.SizedBox(height: 2),
+                                pw.SizedBox(height: 1.5),
                                 pw.Row(
                                   mainAxisAlignment: pw.MainAxisAlignment.center,
                                   children: [
                                     pw.Text(
                                       "Tél : +33 (0)1 42 42 46 93 - Email : ",
-                                      style: pw.TextStyle(fontSize: 7.5, color: PdfColors.grey700),
+                                      style: pw.TextStyle(fontSize: 7, color: PdfColors.grey700),
                                     ),
                                     pw.UrlLink(
                                       destination: "mailto:fournisseurs@viv-prod.com",
                                       child: pw.Text(
                                         "fournisseurs@viv-prod.com",
                                         style: pw.TextStyle(
-                                          fontSize: 7.5,
+                                          fontSize: 7,
                                           color: PdfColors.blue,
                                           decoration: pw.TextDecoration.underline,
                                         ),
@@ -433,7 +443,7 @@ class BdcPdfService {
                           ),
                           // Badge EcoVadis réel
                           if (ecovadisImage != null)
-                            pw.Image(ecovadisImage, height: 63, fit: pw.BoxFit.contain)
+                            pw.Image(ecovadisImage, height: 52, fit: pw.BoxFit.contain)
                           else
                             pw.Container(
                               padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 8),
@@ -509,7 +519,7 @@ class BdcPdfService {
     bool alignRight = false,
   }) {
     return pw.Container(
-      padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+      padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 5),
       alignment: alignCenter
           ? pw.Alignment.center
           : (alignRight ? pw.Alignment.centerRight : pw.Alignment.centerLeft),
@@ -532,7 +542,7 @@ class BdcPdfService {
           : pw.Text(
               text,
               textAlign: alignCenter ? pw.TextAlign.center : pw.TextAlign.left,
-              style: pw.TextStyle(fontSize: 8.5, fontWeight: pw.FontWeight.bold),
+              style: pw.TextStyle(fontSize: 8.5, fontWeight: pw.FontWeight.normal),
             ),
     );
   }
