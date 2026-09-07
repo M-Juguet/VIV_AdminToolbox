@@ -178,11 +178,15 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
   String? _filterClient;
   String? _filterProject;
 
-  // Mémorisation de détection par période
+  // Mémorisation de détection par période et agence
   final Map<String, bool> _periodDetectionStatus = {};
   final Map<String, bool> _expandedProviders = {};
 
-  String get _currentPeriodKey => "${_selectedMonth}_$_selectedYear";
+  String get _currentPeriodKey {
+    final stats = ref.read(dashboardProvider);
+    final agencyKey = stats.selectedAgencyId ?? '';
+    return "${_selectedMonth}_${_selectedYear}_$agencyKey";
+  }
   bool get _isCurrentPeriodDetected => _periodDetectionStatus[_currentPeriodKey] ?? false;
 
   // Données de session mockées
@@ -1799,14 +1803,40 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
               const Text("PÉRIODE : ", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: VivColors.gray400)),
               const SizedBox(width: 8),
               SizedBox(
-                width: 120,
+                width: 140,
                 child: ShadSelect<String>(
                   initialValue: _selectedMonth,
                   options: const [
+                    ShadOption(value: '01', child: Text("Janvier")),
+                    ShadOption(value: '02', child: Text("Février")),
+                    ShadOption(value: '03', child: Text("Mars")),
+                    ShadOption(value: '04', child: Text("Avril")),
+                    ShadOption(value: '05', child: Text("Mai")),
+                    ShadOption(value: '06', child: Text("Juin")),
+                    ShadOption(value: '07', child: Text("Juillet")),
                     ShadOption(value: '08', child: Text("Août")),
                     ShadOption(value: '09', child: Text("Septembre")),
+                    ShadOption(value: '10', child: Text("Octobre")),
+                    ShadOption(value: '11', child: Text("Novembre")),
+                    ShadOption(value: '12', child: Text("Décembre")),
                   ],
-                  selectedOptionBuilder: (context, value) => Text(value == '08' ? 'Août' : 'Septembre'),
+                  selectedOptionBuilder: (context, value) {
+                    const months = {
+                      '01': 'Janvier',
+                      '02': 'Février',
+                      '03': 'Mars',
+                      '04': 'Avril',
+                      '05': 'Mai',
+                      '06': 'Juin',
+                      '07': 'Juillet',
+                      '08': 'Août',
+                      '09': 'Septembre',
+                      '10': 'Octobre',
+                      '11': 'Novembre',
+                      '12': 'Décembre',
+                    };
+                    return Text(months[value] ?? value);
+                  },
                   onChanged: (val) {
                     setState(() {
                       _selectedMonth = val ?? '08';
@@ -1820,10 +1850,13 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
               ),
               const SizedBox(width: 8),
               SizedBox(
-                width: 90,
+                width: 95,
                 child: ShadSelect<String>(
                   initialValue: _selectedYear,
-                  options: const [ShadOption(value: '2026', child: Text("2026"))],
+                  options: const [
+                    ShadOption(value: '2026', child: Text("2026")),
+                    ShadOption(value: '2027', child: Text("2027")),
+                  ],
                   selectedOptionBuilder: (context, value) => Text(value),
                   onChanged: (val) {
                     setState(() {

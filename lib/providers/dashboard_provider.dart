@@ -18,9 +18,14 @@ class DashboardNotifier extends Notifier<DashboardStats> {
 
   @override
   DashboardStats build() {
-    // On watch le boondUser. Si l'utilisateur change ou se déconnecte, 
-    // le Notifier est entièrement reconstruit (état réinitialisé).
-    ref.watch(settingsProvider.select((s) => s.boondUser));
+    // On watch les identifiants Boond. Si l'utilisateur change ou se configure,
+    // on recharge automatiquement la liste des agences.
+    final user = ref.watch(settingsProvider.select((s) => s.boondUser));
+    final url = ref.watch(settingsProvider.select((s) => s.boondUrl));
+
+    if (user.isNotEmpty && url.isNotEmpty) {
+      Future.microtask(() => init());
+    }
     
     return DashboardStats();
   }
@@ -39,13 +44,44 @@ class DashboardNotifier extends Notifier<DashboardStats> {
 
   Future<void> selectAgency(String id, String name) async {
     state = state.copyWith(selectedAgencyId: id, selectedAgencyName: name);
-    await refresh();
+    if (state.isInitialized) {
+      await refresh();
+    }
   }
 
-  /// Initialisation intelligente (désactivée pour économiser l'API)
+  /// Initialisation légère : charge la liste des agences pour la topbar dès que BoondManager est configuré
   Future<void> init() async {
-    // Les appels automatiques au chargement sont désactivés.
-    // L'utilisateur doit initier la synchronisation manuellement.
+    final settings = ref.read(settingsProvider);
+    if (settings.boondUrl.isEmpty || settings.boondUser.isEmpty) {
+      return;
+    }
+
+    if (state.agencies.isNotEmpty) return;
+
+    try {
+      final service = BoondService(
+        baseUrl: settings.boondUrl,
+        user: settings.boondUser,
+        password: settings.boondPassword,
+      );
+
+      final rawAgencies = await service.getAgencies();
+      final agencies = rawAgencies
+          .map(
+            (e) => {
+              'id': e['id'].toString(),
+              'name': e['name'].toString(),
+              'calendarId': e['calendarId']?.toString() ?? '',
+            },
+          )
+          .toList();
+
+      state = state.copyWith(
+        agencies: agencies,
+        selectedAgencyId: state.selectedAgencyId ?? '',
+        selectedAgencyName: state.selectedAgencyName ?? 'Toutes',
+      );
+    } catch (_) {}
   }
 
   Future<void> refresh({bool onlyCompliance = false}) async {

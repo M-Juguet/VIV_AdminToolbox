@@ -40,6 +40,7 @@ class _MainShellState extends ConsumerState<MainShell> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(updateProvider.notifier).checkForUpdates(silent: true);
+      ref.read(dashboardProvider.notifier).init();
     });
   }
 
@@ -366,14 +367,21 @@ class _MainShellState extends ConsumerState<MainShell> {
                                     'Sélectionner une agence',
                                     style: TextStyle(fontSize: 12),
                                   ),
-                                  initialValue: stats.selectedAgencyId,
+                                  initialValue: stats.selectedAgencyId ?? '',
                                   onChanged: (id) {
-                                    final agency = agencies.firstWhere(
-                                      (a) => a['id'] == id,
-                                    );
-                                    ref
-                                        .read(dashboardProvider.notifier)
-                                        .selectAgency(id!, agency['name']!);
+                                    if (id == null || id.isEmpty) {
+                                      ref
+                                          .read(dashboardProvider.notifier)
+                                          .selectAgency('', 'Toutes');
+                                    } else {
+                                      final agency = agencies.firstWhere(
+                                        (a) => a['id'] == id,
+                                        orElse: () => {'name': 'Toutes'},
+                                      );
+                                      ref
+                                          .read(dashboardProvider.notifier)
+                                          .selectAgency(id, agency['name']!);
+                                    }
                                   },
                                   selectedOptionBuilder: (context, value) =>
                                       ShadBadge(
@@ -385,8 +393,11 @@ class _MainShellState extends ConsumerState<MainShell> {
                                         const Icon(LucideIcons.house, size: 12),
                                         const SizedBox(width: 6),
                                         Text(
-                                          stats.selectedAgencyName ??
-                                              'Sélectionner',
+                                          (stats.selectedAgencyName != null &&
+                                                  stats.selectedAgencyName!
+                                                      .isNotEmpty)
+                                              ? stats.selectedAgencyName!
+                                              : 'Toutes',
                                           style: const TextStyle(
                                             fontSize: 10,
                                             fontWeight: FontWeight.bold,
@@ -395,14 +406,18 @@ class _MainShellState extends ConsumerState<MainShell> {
                                       ],
                                     ),
                                   ),
-                                  options: agencies
-                                      .map(
-                                        (agency) => ShadOption(
-                                          value: agency['id']!,
-                                          child: Text(agency['name']!),
-                                        ),
-                                      )
-                                      .toList(),
+                                  options: [
+                                    const ShadOption(
+                                      value: '',
+                                      child: Text('Toutes les agences'),
+                                    ),
+                                    ...agencies.map(
+                                      (agency) => ShadOption(
+                                        value: agency['id']!,
+                                        child: Text(agency['name']!),
+                                      ),
+                                    ),
+                                  ],
                                 )
                               else if (stats.isLoading)
                                 const SizedBox(
