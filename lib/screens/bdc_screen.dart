@@ -249,7 +249,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
       final yearInt = int.tryParse(_selectedYear) ?? DateTime.now().year;
       _holidays = await service.getHolidays(yearInt);
 
-      // Charger le dictionnaire pour obtenir l'ID de l'état "Sortie" et les types de ressources externes
+      // Charger le dictionnaire pour obtenir l'ID de l'état "Sortie", "Contact administratif" et les types de ressources externes
       final dict = await service.getDictionary(forceRefresh: true);
       final resourceStates = dict['data']?['setting']?['state']?['resource'] as List? ?? [];
       int? exitStateId;
@@ -257,6 +257,16 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
         final label = (state['value'] ?? state['label'] ?? '').toString().toLowerCase();
         if (label.contains('sortie')) {
           exitStateId = int.tryParse(state['id']?.toString() ?? '');
+          break;
+        }
+      }
+
+      final contactTypes = dict['data']?['setting']?['typeOf']?['contact'] as List? ?? [];
+      int? adminTypeId;
+      for (var type in contactTypes) {
+        final val = (type['value'] ?? type['label'] ?? '').toString().toLowerCase();
+        if (val.contains('administratif')) {
+          adminTypeId = int.tryParse(type['id']?.toString() ?? '');
           break;
         }
       }
@@ -278,18 +288,50 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
       final startOfPeriod = DateTime(yearInt, monthInt, 1);
       final endOfPeriod = monthInt == 12 ? DateTime(yearInt + 1, 1, 0) : DateTime(yearInt, monthInt + 1, 0);
 
+      // Récupération de l'agence sélectionnée
+      final stats = ref.read(dashboardProvider);
+      final selectedAgencyId = stats.selectedAgencyId;
+
+      final Map<String, dynamic> projectFilters = {
+        'states[]': 1, // Projets actifs
+        'startDate': startDateStr,
+        'endDate': endDateStr,
+      };
+      if (selectedAgencyId != null && selectedAgencyId.isNotEmpty) {
+        projectFilters['agency'] = selectedAgencyId;
+      }
+
       // 1. Récupérer les projets actifs paginés avec dates en amont
       final response = await service.getAllProjectsWithInclusions(
-        filters: {
-          'states[]': 1, // Projets actifs
-          'startDate': startDateStr,
-          'endDate': endDateStr,
-        },
+        filters: projectFilters,
         inclusions: ['company'],
         forceRefresh: true,
       );
-      final projects = response['data'] as List? ?? [];
+      final rawProjects = response['data'] as List? ?? [];
       final included = response['included'] as List? ?? [];
+
+      // Filtrage strict des projets sur la période (startDate / endDate) et l'agence
+      final List<dynamic> projects = rawProjects.where((p) {
+        final pAttr = p['attributes'] ?? {};
+        final pAgencyId = p['relationships']?['agency']?['data']?['id']?.toString();
+        if (selectedAgencyId != null && selectedAgencyId.isNotEmpty && pAgencyId != null && pAgencyId != selectedAgencyId) {
+          return false;
+        }
+
+        final pStartStr = pAttr['startDate']?.toString();
+        final pEndStr = pAttr['endDate']?.toString();
+        final pStart = pStartStr != null ? DateTime.tryParse(pStartStr) : null;
+        final pEnd = pEndStr != null ? DateTime.tryParse(pEndStr) : null;
+
+        // Intersection avec le mois sélectionné
+        final intersection = CalendarService.getIntersection(
+          prestationStart: pStart ?? DateTime(1970),
+          prestationEnd: pEnd,
+          month: monthInt,
+          year: yearInt,
+        );
+        return intersection != null;
+      }).toList();
 
       // Mapper les ID d'entreprises (clients) vers leurs noms pour la résolution rapide
       final Map<String, String> companyNames = {};
@@ -301,363 +343,297 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
         }
       }
 
-      // 2. Parcourir les projets et charger leurs prestations de sous-traitance
-      for (var p in projects) {
-        final projectIdStr = p['id']?.toString() ?? '';
-        final projectId = int.tryParse(projectIdStr);
-        if (projectId == null) continue;
+      // 2. Parcourir les projets filtrés par lots parallèles (Pool de 6 projets simultanés)
+      const int batchSize = 6;
+      for (int i = 0; i < projects.length; i += batchSize) {
+        final batch = projects.skip(i).take(batchSize).toList();
 
-        final projectName = p['attributes']?['reference']?.toString() ?? 'Projet sans nom';
-        final projectRef = "PRJ$projectIdStr";
-        final clientRel = p['relationships']?['company']?['data'];
-        final clientId = clientRel?['id']?.toString();
-        final clientName = companyNames[clientId] ?? 'Client inconnu';
+        final batchFutures = batch.map((p) async {
+          final projectIdStr = p['id']?.toString() ?? '';
+          final projectId = int.tryParse(projectIdStr);
+          if (projectId == null) return <BdcPrestaStep1>[];
 
-        // Récupérer les prestations du projet
-        final List<dynamic> deliveries = await service.getDeliveries(projectId, forceRefresh: true);
+          final projectName = p['attributes']?['reference']?.toString() ?? 'Projet sans nom';
+          final projectRef = "PRJ$projectIdStr";
+          final clientRel = p['relationships']?['company']?['data'];
+          final clientId = clientRel?['id']?.toString();
+          final clientName = companyNames[clientId] ?? 'Client inconnu';
 
-        for (var delivery in deliveries) {
-          final delId = delivery['id']?.toString() ?? '';
-          final delAttr = delivery['attributes'] ?? {};
-      
+          // Récupérer les prestations du projet
+          final List<dynamic> deliveries = await service.getDeliveries(projectId, forceRefresh: false);
+          final List<BdcPrestaStep1> localCandidates = [];
 
-          
-          // Récupérer le détail de la prestation pour avoir le averageDailyCost
-          Map<String, dynamic> deliveryDetail = {};
-          Map<String, dynamic> deliveryDetailAttr = {};
-          try {
-            final delIdInt = int.parse(delId);
-            deliveryDetail = await service.getDelivery(delIdInt, forceRefresh: true);
-            deliveryDetailAttr = deliveryDetail['data']?['attributes'] ?? {};
-          } catch (_) {}
-          final delTitle = delAttr['title']?.toString() ?? 'Prestation sans titre';
-          
-          if (delTitle.toLowerCase().contains('shift')) {
-            continue;
-          }
-          
-          final startDateStr = delAttr['startDate']?.toString();
-          final endDateStr = delAttr['endDate']?.toString();
-          
-          if (startDateStr != null && endDateStr != null) {
-            final startDate = DateTime.tryParse(startDateStr);
-            final endDate = DateTime.tryParse(endDateStr);
-            if (startDate != null && endDate != null) {
-              if (endDate.isBefore(startOfPeriod) || startDate.isAfter(endOfPeriod)) {
-                // La prestation ne se superpose pas avec le mois sélectionné, on l'ignore
-                continue;
+          for (var delivery in deliveries) {
+            final delId = delivery['id']?.toString() ?? '';
+            final delAttr = delivery['attributes'] ?? {};
+            final delTitle = delAttr['title']?.toString() ?? 'Prestation sans titre';
+
+            if (delTitle.toLowerCase().contains('shift')) {
+              continue;
+            }
+
+            final startStr = delAttr['startDate']?.toString();
+            final endStr = delAttr['endDate']?.toString();
+
+            if (startStr != null) {
+              final dStart = DateTime.tryParse(startStr);
+              final dEnd = endStr != null ? DateTime.tryParse(endStr) : null;
+              if (dStart != null) {
+                final intersection = CalendarService.getIntersection(
+                  prestationStart: dStart,
+                  prestationEnd: dEnd,
+                  month: monthInt,
+                  year: yearInt,
+                );
+                if (intersection == null) {
+                  // Hors période
+                  continue;
+                }
               }
             }
-          }
-          
-          final dependsOn = delivery['relationships']?['dependsOn']?['data'];
-          final purchaseRel = delivery['relationships']?['purchase']?['data'];
 
-          // Résoudre la ressource et vérifier si elle est externe (typeOf == 1)
-          bool isExternalResource = false;
-          String resourceName = "Inconnu";
-          String? consultantTitle;
-          bool isResourceExit = false;
-          
-          if (dependsOn != null) {
-            final resId = int.tryParse(dependsOn['id']?.toString() ?? '');
-            if (resId != null) {
-              try {
-                final res = await service.getResource(resId);
-                final rAttr = res['attributes'] ?? {};
-                final resourceState = int.tryParse(rAttr['state']?.toString() ?? '');
-                if (resourceState != null && exitStateId != null && resourceState == exitStateId) {
-                  isResourceExit = true;
-                } else {
-                  resourceName = "${rAttr['firstName'] ?? ''} ${rAttr['lastName'] ?? ''}".trim();
-                  consultantTitle = rAttr['title']?.toString() ?? rAttr['function']?.toString();
-                  final resType = int.tryParse(rAttr['typeOf']?.toString() ?? '');
-                  if (resType != null && externalResourceTypeIds.contains(resType)) {
-                    isExternalResource = true;
+            final dependsOn = delivery['relationships']?['dependsOn']?['data'];
+            final purchaseRel = delivery['relationships']?['purchase']?['data'];
+
+            // Résoudre la ressource et vérifier si elle est externe
+            bool isExternalResource = false;
+            String resourceName = "Non spécifié";
+            String? consultantTitle;
+            bool isResourceExit = false;
+
+            if (dependsOn != null) {
+              final resId = int.tryParse(dependsOn['id']?.toString() ?? '');
+              if (resId != null) {
+                try {
+                  final res = await service.getResource(resId);
+                  final rAttr = res['attributes'] ?? {};
+                  final resourceState = int.tryParse(rAttr['state']?.toString() ?? '');
+                  if (resourceState != null && exitStateId != null && resourceState == exitStateId) {
+                    isResourceExit = true;
+                  } else {
+                    resourceName = "${rAttr['firstName'] ?? ''} ${rAttr['lastName'] ?? ''}".trim();
+                    consultantTitle = rAttr['title']?.toString() ?? rAttr['function']?.toString();
+                    final resType = int.tryParse(rAttr['typeOf']?.toString() ?? '');
+                    if (resType != null && externalResourceTypeIds.contains(resType)) {
+                      isExternalResource = true;
+                    }
                   }
-                }
-              } catch (_) {}
+                } catch (_) {}
+              }
             }
-          }
 
-          if (isResourceExit) {
-            continue;
-          }
+            if (isResourceExit) {
+              continue;
+            }
 
-          // Si ce n'est pas un consultant externe ET qu'il n'y a pas d'achat lié, on l'ignore (salarié normal)
-          if (!isExternalResource && purchaseRel == null) {
-            continue;
-          }
+            // Si ce n'est pas un consultant externe ET qu'il n'y a pas d'achat lié, on l'ignore (salarié interne sans achat)
+            if (!isExternalResource && purchaseRel == null) {
+              continue;
+            }
 
-          // Résoudre l'achat et les infos fournisseur (Company + Contact)
-          String providerName = "Aucun";
-          String providerId = "Aucun";
-          String? alertMessage;
-          String contactEmail = "";
-          String? providerContactId;
-          String? purchaseIdStr;
+            // Résoudre l'achat et les infos fournisseur (Company + Contact + Adresse)
+            String providerName = "Aucun";
+            String providerId = "Aucun";
+            String providerAddress = "Non renseignée";
+            String providerPostcode = "";
+            String providerTown = "";
+            String providerCountry = "France";
+            String? alertMessage;
+            String contactEmail = "";
+            String? providerContactId;
+            String? purchaseIdStr;
+            double purchaseTjm = 0;
 
-          double purchaseTjm = 0;
-          if (purchaseRel == null) {
-            alertMessage = "Aucun achat associé à la prestation.";
-          } else {
-            final purchaseId = int.tryParse(purchaseRel['id']?.toString() ?? '');
-            purchaseIdStr = purchaseId?.toString();
-            if (purchaseId != null) {
-              try {
-                // Récupère l'achat avec inclusions de la société fournisseur et du contact fournisseur
-                final pResponse = await service.getPurchaseWithInclusions(purchaseId, forceRefresh: true);
-                final pAttr = pResponse['data']?['attributes'] ?? {};
-                purchaseTjm = double.tryParse(pAttr['averageDailyCost']?.toString() ?? '0') ?? 0;
-                final pIncluded = pResponse['included'] as List? ?? [];
-                
-                // 1. Trouver l'entité Société (Company) dans included
-                final compObj = pIncluded.firstWhere(
-                  (item) => item['type'] == 'companies' || item['type'] == 'company',
-                  orElse: () => null,
-                );
-                if (compObj != null) {
-                  providerName = compObj['attributes']?['name']?.toString() ?? 'Société sans nom';
-                  providerId = compObj['id']?.toString() ?? '';
-                }
+            if (purchaseRel == null) {
+              alertMessage = "Aucun achat associé à la prestation.";
+            } else {
+              final purchaseId = int.tryParse(purchaseRel['id']?.toString() ?? '');
+              purchaseIdStr = purchaseId?.toString();
+              if (purchaseId != null) {
+                try {
+                  final pResponse = await service.getPurchaseWithInclusions(purchaseId, forceRefresh: false);
+                  final pAttr = pResponse['data']?['attributes'] ?? {};
+                  purchaseTjm = double.tryParse(pAttr['averageDailyCost']?.toString() ?? '0') ?? 0;
+                  final pIncluded = pResponse['included'] as List? ?? [];
 
-                // 2. Trouver l'entité Contact (providerContact) dans included
-                final contactObj = pIncluded.firstWhere(
-                  (item) => item['type'] == 'contacts' || item['type'] == 'contact',
-                  orElse: () => null,
-                );
-                if (contactObj != null) {
-                  providerContactId = contactObj['id']?.toString();
-                  final cAttr = contactObj['attributes'] ?? {};
-                  contactEmail = (cAttr['email'] ??
-                          cAttr['email1'] ??
-                          cAttr['emailOne'] ??
-                          cAttr['emailPro'] ??
-                          '')
-                      .toString();
-                } else if (providerId != "Aucun" && providerId.isNotEmpty) {
-                  // Fallback : charger les contacts de la société fournisseur si non lié sur l'achat
-                  final companyIdInt = int.tryParse(providerId);
-                  if (companyIdInt != null) {
+                  // 1. Trouver l'entité Société (Company) dans included
+                  final compObj = pIncluded.firstWhere(
+                    (item) => item['type'] == 'companies' || item['type'] == 'company',
+                    orElse: () => null,
+                  );
+                  if (compObj != null) {
+                    providerName = compObj['attributes']?['name']?.toString() ?? 'Société sans nom';
+                    providerId = compObj['id']?.toString() ?? '';
+                  }
+
+                  // Coordonnées postales complètes
+                  if (providerId != "Aucun" && providerId.isNotEmpty && int.tryParse(providerId) != null) {
                     try {
-                      final contactsList = await service.getCompanyContacts(companyIdInt);
+                      final compInfo = await service.getCompanyInformation(int.parse(providerId));
+                      final cInfoAttr = compInfo['attributes'] ?? {};
+                      providerAddress = cInfoAttr['address']?.toString() ?? 'Non renseignée';
+                      providerPostcode = cInfoAttr['postcode']?.toString() ?? '';
+                      providerTown = cInfoAttr['town']?.toString() ?? '';
+                      providerCountry = cInfoAttr['country']?.toString() ?? 'France';
+                    } catch (_) {}
+                  }
+
+                  // 2. Trouver l'entité Contact (providerContact) dans included
+                  final contactObj = pIncluded.firstWhere(
+                    (item) => item['type'] == 'contacts' || item['type'] == 'contact',
+                    orElse: () => null,
+                  );
+                  if (contactObj != null) {
+                    providerContactId = contactObj['id']?.toString();
+                    final cAttr = contactObj['attributes'] ?? {};
+                    contactEmail = (cAttr['email'] ?? cAttr['email1'] ?? cAttr['emailOne'] ?? cAttr['emailPro'] ?? '').toString();
+                  } else if (providerId != "Aucun" && providerId.isNotEmpty && int.tryParse(providerId) != null) {
+                    // Fallback contact administratif
+                    try {
+                      final contactsList = await service.getCompanyContacts(int.parse(providerId));
                       if (contactsList.isEmpty) {
                         alertMessage = "Aucun contact renseigné pour le fournisseur.";
-                      } else if (contactsList.length == 1) {
-                        // Dans le cas où un seul contact est disponible : le récupérer et vérifier l'email
-                        final singleContact = contactsList.first;
-                        providerContactId = singleContact['id']?.toString();
-                        final cAttr = singleContact['attributes'] ?? {};
-                        contactEmail = (cAttr['email'] ??
-                                cAttr['email1'] ??
-                                cAttr['emailOne'] ??
-                                cAttr['emailPro'] ??
-                                '')
-                            .toString();
                       } else {
-                        // Dans le cas où plusieurs contacts sont disponibles : filtrage par type "Contact administratif"
-                        final dict = await service.getDictionary();
-                        final contactTypes = dict['data']?['setting']?['typeOf']?['contact'] as List? ?? [];
-                        int? adminTypeId;
-                        for (var type in contactTypes) {
-                          final val = (type['value'] ?? type['label'] ?? '').toString().toLowerCase();
-                          if (val.contains('administratif')) {
-                            adminTypeId = int.tryParse(type['id']?.toString() ?? '');
-                            break;
-                          }
-                        }
-
                         final adminContacts = contactsList.where((c) {
-                           if (adminTypeId == null) return false;
-                           final typeAttr = c['attributes']?['type'];
-                           final typesAttr = c['attributes']?['types'];
-                           final typesOfAttr = c['attributes']?['typesOf'];
-                           
-                           final List<String> rawValues = [];
-                           if (typeAttr != null) {
-                             if (typeAttr is List) {
-                               rawValues.addAll(typeAttr.map((e) => e.toString()));
-                             } else {
-                               rawValues.addAll(typeAttr.toString().split('|'));
-                             }
-                           }
-                           if (typesAttr != null) {
-                             if (typesAttr is List) {
-                               rawValues.addAll(typesAttr.map((e) => e.toString()));
-                             } else {
-                               rawValues.addAll(typesAttr.toString().split('|'));
-                             }
-                           }
-                           if (typesOfAttr != null) {
-                             if (typesOfAttr is List) {
-                               rawValues.addAll(typesOfAttr.map((e) => e.toString()));
-                             } else {
-                               rawValues.addAll(typesOfAttr.toString().split('|'));
-                             }
-                           }
-                           
-                           final cleanValues = rawValues
-                               .map((e) => e.trim())
-                               .where((e) => e.isNotEmpty)
-                               .toList();
-                               
-                           return cleanValues.contains(adminTypeId.toString());
-                         }).toList();
+                          if (adminTypeId == null) return false;
+                          final tAttr = c['attributes']?['type'] ?? c['attributes']?['typesOf'] ?? c['attributes']?['types'];
+                          return tAttr?.toString().contains(adminTypeId.toString()) ?? false;
+                        }).toList();
 
-
-
-                         if (adminContacts.isEmpty) {
-                          alertMessage = "Aucun contact administratif parmi les contacts trouvés.";
-                        } else if (adminContacts.length > 1) {
-                          alertMessage = "Plusieurs contacts administratifs détectés.";
-                        } else {
-                          // Un seul contact a le type "Contact administratif"
-                          final selectedContact = adminContacts.first;
-                          providerContactId = selectedContact['id']?.toString();
-                          final cAttr = selectedContact['attributes'] ?? {};
-                          contactEmail = (cAttr['email'] ??
-                                  cAttr['email1'] ??
-                                  cAttr['emailOne'] ??
-                                  cAttr['emailPro'] ??
-                                  '')
-                              .toString();
+                        final targetContact = adminContacts.isNotEmpty ? adminContacts.first : contactsList.first;
+                        providerContactId = targetContact['id']?.toString();
+                        final cAttr = targetContact['attributes'] ?? {};
+                        contactEmail = (cAttr['email'] ?? cAttr['email1'] ?? cAttr['emailOne'] ?? cAttr['emailPro'] ?? '').toString();
+                        if (adminContacts.isEmpty && contactsList.length > 1) {
+                          alertMessage = "Plusieurs contacts détectés, aucun typé 'Administratif'.";
                         }
                       }
                     } catch (_) {}
                   }
-                }
-                
-                // Définir le message d'alerte global si non défini ci-dessus
-                if (alertMessage == null) {
-                  if (providerId == "Aucun" || providerId.isEmpty) {
-                    alertMessage = "Aucun fournisseur lié à l'achat de prestation.";
-                  } else if (providerContactId == null || providerContactId.isEmpty) {
-                    alertMessage = "Aucun contact renseigné pour le fournisseur.";
-                  } else if (contactEmail.isEmpty || !contactEmail.contains('@')) {
-                    alertMessage = "E-mail de contact non renseigné.";
+
+                  // Définir le message d'alerte global si non défini ci-dessus
+                  if (alertMessage == null) {
+                    if (providerId == "Aucun" || providerId.isEmpty) {
+                      alertMessage = "Aucun fournisseur lié à la prestation.";
+                    } else if (contactEmail.isEmpty || !contactEmail.contains('@')) {
+                      alertMessage = "E-mail de contact manquant ou invalide.";
+                    }
                   }
+                } catch (e) {
+                  alertMessage = "Impossible de récupérer les informations fournisseur : $e";
                 }
-              } catch (e) {
-                alertMessage = "Impossible de récupérer les informations fournisseur : $e";
-              }
-            } else {
-              alertMessage = "Aucun achat associé.";
-            }
-          }
-
-          // Résoudre l'adresse complète du fournisseur si providerId est connu
-          String providerAddress = "Non renseignée";
-          String providerPostcode = "";
-          String providerTown = "";
-          String providerCountry = "";
-          if (providerId != "Aucun" && providerId.isNotEmpty) {
-            final compIdInt = int.tryParse(providerId);
-            if (compIdInt != null) {
-              try {
-                final companyInfo = await service.getCompanyInformation(compIdInt);
-                final cAttr = companyInfo['attributes'] ?? {};
-                providerAddress = cAttr['address']?.toString() ?? 'Non renseignée';
-                providerPostcode = cAttr['postcode']?.toString() ?? '';
-                providerTown = cAttr['town']?.toString() ?? '';
-                providerCountry = cAttr['country']?.toString() ?? '';
-              } catch (_) {}
-            }
-          }
-
-          // Résoudre la référence (ex: MIS31) avec fallback sur "MIS$delId"
-          final String delRef = delAttr['reference']?.toString() ?? "MIS$delId";
-          final String delTitleWithRef = "$delRef - $delTitle";
-
-          // Borner les dates au mois sélectionné si elles dépassent
-          DateTime finalStartDate = startOfPeriod;
-          DateTime finalEndDate = endOfPeriod;
-
-          if (startDateStr != null && endDateStr != null) {
-            final startDate = DateTime.tryParse(startDateStr);
-            final endDate = DateTime.tryParse(endDateStr);
-            if (startDate != null && endDate != null) {
-              if (startDate.isAfter(startOfPeriod)) {
-                finalStartDate = startDate;
-              }
-              if (endDate.isBefore(endOfPeriod)) {
-                finalEndDate = endDate;
+              } else {
+                alertMessage = "Aucun achat associé.";
               }
             }
-          }
 
-          final String displayStartDate = "${finalStartDate.day.toString().padLeft(2, '0')}/${finalStartDate.month.toString().padLeft(2, '0')}/${finalStartDate.year}";
-          final String displayEndDate = "${finalEndDate.day.toString().padLeft(2, '0')}/${finalEndDate.month.toString().padLeft(2, '0')}/${finalEndDate.year}";
+            // Résoudre la référence (ex: MIS31) avec fallback sur "MIS$delId"
+            final String delRef = delAttr['reference']?.toString() ?? "MIS$delId";
+            final String delTitleWithRef = "$delRef - $delTitle";
 
-          // Écriture du debug log
-          try {
-            final logFile = File(r'C:\Users\stati\.gemini\antigravity\brain\2d366e5c-3537-42cd-8cc7-7570a907bd0c\debug_cjm.txt');
-            logFile.writeAsStringSync(
-              "DETECTION - ID: $delId, Title: $delTitle, contractAverageDailyCost: ${delAttr['contractAverageDailyCost']} (Type: ${delAttr['contractAverageDailyCost']?.runtimeType}), costsSimulatedExcludingTax: ${delAttr['costsSimulatedExcludingTax']}\n",
-              mode: FileMode.append,
+            // Borner les dates au mois sélectionné si elles dépassent
+            DateTime finalStartDate = startOfPeriod;
+            DateTime finalEndDate = endOfPeriod;
+
+            if (startStr != null && endStr != null) {
+              final startDate = DateTime.tryParse(startStr);
+              final endDate = DateTime.tryParse(endStr);
+              if (startDate != null && endDate != null) {
+                if (startDate.isAfter(startOfPeriod)) {
+                  finalStartDate = startDate;
+                }
+                if (endDate.isBefore(endOfPeriod)) {
+                  finalEndDate = endDate;
+                }
+              }
+            }
+
+            final String displayStartDate = "${finalStartDate.day.toString().padLeft(2, '0')}/${finalStartDate.month.toString().padLeft(2, '0')}/${finalStartDate.year}";
+            final String displayEndDate = "${finalEndDate.day.toString().padLeft(2, '0')}/${finalEndDate.month.toString().padLeft(2, '0')}/${finalEndDate.year}";
+
+            // Récupérer le détail de la prestation pour avoir le averageDailyCost précis
+            Map<String, dynamic> deliveryDetail = {};
+            Map<String, dynamic> deliveryDetailAttr = {};
+            try {
+              final delIdInt = int.tryParse(delId);
+              if (delIdInt != null) {
+                deliveryDetail = await service.getDelivery(delIdInt, forceRefresh: false);
+                deliveryDetailAttr = deliveryDetail['data']?['attributes'] ?? {};
+              }
+            } catch (_) {}
+
+            // Calcul du TJM d'achat (averageDailyCost) selon la cascade validée
+            double averageDailyCost = _parseTjm(deliveryDetailAttr['averageDailyCost']);
+            if (averageDailyCost == 0) {
+              averageDailyCost = _parseTjm(deliveryDetailAttr['contractAverageDailyCost']);
+            }
+            if (averageDailyCost == 0) {
+              averageDailyCost = _parseTjm(delAttr['averageDailyCost']);
+            }
+            if (averageDailyCost == 0) {
+              averageDailyCost = _parseTjm(delAttr['contractAverageDailyCost']);
+            }
+            if (averageDailyCost == 0) {
+              averageDailyCost = purchaseTjm;
+            }
+            final double quantitySold = double.tryParse(delAttr['numberOfDaysInvoicedOrQuantity']?.toString() ?? '0') ?? 0;
+            if (averageDailyCost == 0) {
+              final double costsSimulated = double.tryParse(delAttr['costsSimulatedExcludingTax']?.toString() ?? '0') ?? 0;
+              if (quantitySold > 0 && costsSimulated > 0) {
+                averageDailyCost = costsSimulated / quantitySold;
+              }
+            }
+
+            final candidate = BdcPrestaStep1(
+              id: delId,
+              consultantName: resourceName,
+              providerName: providerName,
+              providerId: providerId,
+              projectName: projectName,
+              clientName: clientName,
+              title: delTitleWithRef,
+              alertMessage: alertMessage,
+              boondLink: "${settings.boondUrl.endsWith('/') ? settings.boondUrl : '${settings.boondUrl}/'}projects/$projectId/deliveries",
+              isSelected: alertMessage == null, // Coché par défaut s'il n'y a pas d'alerte critique
+              tjmAchat: averageDailyCost,
+              quantitySold: quantitySold,
+              consultantTitle: consultantTitle,
+              clientCsoc: clientId ?? "",
+              projectId: projectIdStr,
+              providerEmail: contactEmail,
+              providerContactId: providerContactId,
+              purchaseId: purchaseIdStr,
+              providerAddress: providerAddress,
+              providerPostcode: providerPostcode,
+              providerTown: providerTown,
+              providerCountry: providerCountry,
+              startDate: displayStartDate,
+              endDate: displayEndDate,
+              prestationRef: delRef,
+              projectRef: projectRef,
             );
-          } catch (_) {}
 
-          // Extraire la quantité vendue et calculer le TJM d'achat
-          double averageDailyCost = _parseTjm(deliveryDetailAttr['averageDailyCost']);
-          if (averageDailyCost == 0) {
-            averageDailyCost = _parseTjm(deliveryDetailAttr['contractAverageDailyCost']);
-          }
-          if (averageDailyCost == 0) {
-            averageDailyCost = _parseTjm(delAttr['contractAverageDailyCost']);
-          }
-          if (averageDailyCost == 0) {
-            averageDailyCost = purchaseTjm;
-          }
-          final double quantitySold = double.tryParse(delAttr['numberOfDaysInvoicedOrQuantity']?.toString() ?? '0') ?? 0;
-          if (averageDailyCost == 0) {
-            final double costsSimulated = double.tryParse(delAttr['costsSimulatedExcludingTax']?.toString() ?? '0') ?? 0;
-            if (quantitySold > 0) {
-              averageDailyCost = costsSimulated / quantitySold;
+            // Vérifier si un doublon d'envoi existe en BDD locale
+            final log = await logsService.getSentLog(candidate.providerId, period);
+            if (log != null) {
+              candidate.isAlreadySent = true;
+              final sentAtStr = log['sentAt'] as String?;
+              if (sentAtStr != null) {
+                final sentAt = DateTime.parse(sentAtStr);
+                candidate.sentDate = "${sentAt.day.toString().padLeft(2, '0')}/${sentAt.month.toString().padLeft(2, '0')}/${sentAt.year}";
+              }
+              candidate.isSelected = false; // Décoché par défaut si déjà envoyé
             }
+
+            localCandidates.add(candidate);
           }
 
-           final candidate = BdcPrestaStep1(
-            id: delId,
-            consultantName: resourceName,
-            providerName: providerName,
-            providerId: providerId,
-            projectName: projectName,
-            clientName: clientName,
-            title: delTitleWithRef,
-            alertMessage: alertMessage,
-            boondLink: "${settings.boondUrl.endsWith('/') ? settings.boondUrl : '${settings.boondUrl}/'}projects/$projectId/deliveries",
-            isSelected: alertMessage == null, // Coché par défaut s'il n'y a pas d'alerte critique
-            tjmAchat: averageDailyCost,
-            quantitySold: quantitySold,
-            consultantTitle: consultantTitle,
-            clientCsoc: clientId ?? "",
-            projectId: projectIdStr,
-            providerEmail: contactEmail,
-            providerContactId: providerContactId,
-            purchaseId: purchaseIdStr,
-            providerAddress: providerAddress,
-            providerPostcode: providerPostcode,
-            providerTown: providerTown,
-            providerCountry: providerCountry,
-            startDate: displayStartDate,
-            endDate: displayEndDate,
-            prestationRef: delRef,
-            projectRef: projectRef,
-          );
+          return localCandidates;
+        });
 
-          // Vérifier si un doublon d'envoi existe en BDD locale
-          final log = await logsService.getSentLog(candidate.providerId, period);
-          if (log != null) {
-            candidate.isAlreadySent = true;
-            final sentAtStr = log['sentAt'] as String?;
-            if (sentAtStr != null) {
-              final sentAt = DateTime.parse(sentAtStr);
-              candidate.sentDate = "${sentAt.day.toString().padLeft(2, '0')}/${sentAt.month.toString().padLeft(2, '0')}/${sentAt.year}";
-            }
-            candidate.isSelected = false; // Décoché par défaut si déjà envoyé
-          }
-
-          detectedCandidates.add(candidate);
+        final results = await Future.wait(batchFutures);
+        for (var res in results) {
+          detectedCandidates.addAll(res);
         }
       }
       
@@ -967,10 +943,13 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
         );
       } catch (_) {}
 
-      // Extraire la quantité vendue et le TJM d'achat
+      // Extraire la quantité vendue et le TJM d'achat selon la cascade validée
       double averageDailyCost = _parseTjm(deliveryDetailAttr['averageDailyCost']);
       if (averageDailyCost == 0) {
         averageDailyCost = _parseTjm(deliveryDetailAttr['contractAverageDailyCost']);
+      }
+      if (averageDailyCost == 0) {
+        averageDailyCost = _parseTjm(delAttr['averageDailyCost']);
       }
       if (averageDailyCost == 0) {
         averageDailyCost = _parseTjm(delAttr['contractAverageDailyCost']);
@@ -981,7 +960,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
       final double quantitySold = double.tryParse(delAttr['numberOfDaysInvoicedOrQuantity']?.toString() ?? '0') ?? 0;
       if (averageDailyCost == 0) {
         final double costsSimulated = double.tryParse(delAttr['costsSimulatedExcludingTax']?.toString() ?? '0') ?? 0;
-        if (quantitySold > 0) {
+        if (quantitySold > 0 && costsSimulated > 0) {
           averageDailyCost = costsSimulated / quantitySold;
         }
       }
