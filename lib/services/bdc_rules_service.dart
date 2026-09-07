@@ -6,17 +6,24 @@ import 'package:path/path.dart';
 class BdcRuleKeyword {
   String text;
   bool caseSensitive;
+  bool isNegative; // true: ne contient pas, false: contient
 
-  BdcRuleKeyword({required this.text, this.caseSensitive = false});
+  BdcRuleKeyword({
+    required this.text,
+    this.caseSensitive = false,
+    this.isNegative = false,
+  });
 
   Map<String, dynamic> toJson() => {
         'text': text,
         'caseSensitive': caseSensitive,
+        'isNegative': isNegative,
       };
 
   factory BdcRuleKeyword.fromJson(Map<String, dynamic> json) => BdcRuleKeyword(
         text: json['text'] ?? '',
         caseSensitive: json['caseSensitive'] ?? false,
+        isNegative: json['isNegative'] ?? false,
       );
 }
 
@@ -27,6 +34,10 @@ class BdcRule {
   final String contactName;
   final String contactCcon;
   final String projectId;
+  final String resourceId;
+  final String resourceName;
+  final String providerId;
+  final String providerName;
   final List<BdcRuleKeyword> keywords;
   final String calculationMode; // 'standard', 'sold', 'manual'
   final double manualDays;
@@ -39,6 +50,10 @@ class BdcRule {
     required this.contactName,
     required this.contactCcon,
     required this.projectId,
+    this.resourceId = '',
+    this.resourceName = '',
+    this.providerId = '',
+    this.providerName = '',
     required this.keywords,
     required this.calculationMode,
     required this.manualDays,
@@ -52,6 +67,10 @@ class BdcRule {
         'contactName': contactName,
         'contactCcon': contactCcon,
         'projectId': projectId,
+        'resourceId': resourceId,
+        'resourceName': resourceName,
+        'providerId': providerId,
+        'providerName': providerName,
         'keywords': keywords.map((k) => k.toJson()).toList(),
         'calculationMode': calculationMode,
         'manualDays': manualDays,
@@ -65,6 +84,10 @@ class BdcRule {
         contactName: json['contactName'] ?? '',
         contactCcon: json['contactCcon'] ?? '',
         projectId: json['projectId'] ?? '',
+        resourceId: json['resourceId'] ?? '',
+        resourceName: json['resourceName'] ?? '',
+        providerId: json['providerId'] ?? '',
+        providerName: json['providerName'] ?? '',
         keywords: (json['keywords'] as List? ?? [])
             .map((k) => BdcRuleKeyword.fromJson(k))
             .toList(),

@@ -41,6 +41,7 @@ class BdcPrestaStep1 {
   final String? consultantTitle;
   final String clientCsoc;
   final String projectId;
+  final String resourceId;
   final String providerEmail;
   final String? providerContactId;
   final String? purchaseId;
@@ -73,6 +74,7 @@ class BdcPrestaStep1 {
     this.consultantTitle,
     required this.clientCsoc,
     required this.projectId,
+    this.resourceId = '',
     required this.providerEmail,
     this.providerContactId,
     this.purchaseId,
@@ -606,6 +608,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
               consultantTitle: consultantTitle,
               clientCsoc: clientId ?? "",
               projectId: projectIdStr,
+              resourceId: dependsOn?['id']?.toString() ?? "",
               providerEmail: contactEmail,
               providerContactId: providerContactId,
               purchaseId: purchaseIdStr,
@@ -994,6 +997,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
         consultantTitle: consultantTitle,
         clientCsoc: item.clientCsoc,
         projectId: item.projectId,
+        resourceId: resourceId,
         providerEmail: contactEmail,
         providerContactId: providerContactId,
         purchaseId: purchaseIdStr,
@@ -1113,19 +1117,42 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
         if (rule.projectId.isNotEmpty && rule.projectId != c.projectId) {
           continue;
         }
+
+        // 3. Filtre Ressource (si configuré)
+        if (rule.resourceId.isNotEmpty && rule.resourceId != c.resourceId) {
+          continue;
+        }
+
+        // 4. Filtre Fournisseur (si configuré)
+        if (rule.providerId.isNotEmpty && rule.providerId != c.providerId) {
+          continue;
+        }
         
-        // 3. Filtre Mots-clés (si configuré)
+        // 5. Filtre Mots-clés (si configuré)
+        // Tous les mots-clés configurés doivent satisfaire leur condition (ET logique)
         if (rule.keywords.isNotEmpty) {
-          bool keywordMatched = false;
+          bool allKeywordsMatched = true;
           for (var kw in rule.keywords) {
+            if (kw.text.trim().isEmpty) continue;
             final textToSearch = kw.caseSensitive ? c.title : c.title.toLowerCase();
             final query = kw.caseSensitive ? kw.text : kw.text.toLowerCase();
-            if (textToSearch.contains(query)) {
-              keywordMatched = true;
-              break;
+            final containsKeyword = textToSearch.contains(query);
+
+            if (kw.isNegative) {
+              // Si le mot-clé est négatif : la condition est remplie si le texte NE CONTIENT PAS le mot-clé
+              if (containsKeyword) {
+                allKeywordsMatched = false;
+                break;
+              }
+            } else {
+              // Si le mot-clé est positif : la condition est remplie si le texte CONTIENT le mot-clé
+              if (!containsKeyword) {
+                allKeywordsMatched = false;
+                break;
+              }
             }
           }
-          if (!keywordMatched) continue;
+          if (!allKeywordsMatched) continue;
         }
 
         // Si on arrive ici, la règle correspond !

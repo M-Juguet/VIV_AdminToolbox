@@ -25,6 +25,8 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
   String _boondLoadError = "";
   List<Map<String, dynamic>> _allClients = []; // id, name
   List<Map<String, dynamic>> _allProjects = []; // id, name, clientId
+  List<Map<String, dynamic>> _allResources = []; // id, name
+  List<Map<String, dynamic>> _allProviders = []; // id, name
 
   // Données contextuelles pour le formulaire
   List<Map<String, dynamic>> _filteredProjectsForClient = [];
@@ -46,6 +48,14 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
 
   bool _showProjectField = false;
   String _projectId = "";
+
+  bool _showResourceField = false;
+  String _resourceId = "";
+  String _resourceName = "";
+
+  bool _showProviderField = false;
+  String _providerId = "";
+  String _providerName = "";
 
   List<BdcRuleKeyword> _keywords = [];
 
@@ -121,9 +131,47 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
         }
       }
 
+      // 2. Récupérer les ressources actives (state == 1)
+      List<Map<String, dynamic>> loadedResources = [];
+      try {
+        final resourcesRaw = await service.searchResources('');
+        for (var r in resourcesRaw) {
+          final id = r['id']?.toString() ?? '';
+          final rAttr = r['attributes'] as Map<String, dynamic>? ?? {};
+          final name = "${rAttr['firstName'] ?? ''} ${rAttr['lastName'] ?? ''}".trim();
+          if (id.isNotEmpty && name.isNotEmpty) {
+            loadedResources.add({
+              'id': id,
+              'name': name,
+            });
+          }
+        }
+        loadedResources.sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
+      } catch (_) {}
+
+      // 3. Récupérer les fournisseurs (sociétés de type fournisseur ou toutes sociétés)
+      List<Map<String, dynamic>> loadedProviders = [];
+      try {
+        final companiesRaw = await service.searchCompanies('');
+        for (var comp in companiesRaw) {
+          final id = comp['id']?.toString() ?? '';
+          final compAttr = comp['attributes'] as Map<String, dynamic>? ?? {};
+          final name = compAttr['name']?.toString().toUpperCase() ?? '';
+          if (id.isNotEmpty && name.isNotEmpty) {
+            loadedProviders.add({
+              'id': id,
+              'name': name,
+            });
+          }
+        }
+        loadedProviders.sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
+      } catch (_) {}
+
       setState(() {
         _allClients = clientsMap.values.toList();
         _allProjects = loadedProjects;
+        _allResources = loadedResources;
+        _allProviders = loadedProviders;
         _isLoadingBoondData = false;
       });
     } catch (e) {
@@ -208,6 +256,12 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
       _contactCcon = "";
       _showProjectField = false;
       _projectId = "";
+      _showResourceField = false;
+      _resourceId = "";
+      _resourceName = "";
+      _showProviderField = false;
+      _providerId = "";
+      _providerName = "";
       _keywords = [];
       _calculationMode = "standard";
       _manualDays = 1.0;
@@ -232,7 +286,21 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
       _showProjectField = rule.projectId.isNotEmpty;
       _projectId = rule.projectId;
 
-      _keywords = List.from(rule.keywords);
+      _showResourceField = rule.resourceId.isNotEmpty;
+      _resourceId = rule.resourceId;
+      _resourceName = rule.resourceName;
+
+      _showProviderField = rule.providerId.isNotEmpty;
+      _providerId = rule.providerId;
+      _providerName = rule.providerName;
+
+      _keywords = rule.keywords
+          .map((k) => BdcRuleKeyword(
+                text: k.text,
+                caseSensitive: k.caseSensitive,
+                isNegative: k.isNegative,
+              ))
+          .toList();
       _calculationMode = rule.calculationMode;
       _manualDays = rule.manualDays > 0 ? rule.manualDays : 1.0;
       _titleMode = rule.titleMode;
@@ -264,6 +332,10 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
       contactName: _showContactFields ? _contactName.trim() : "",
       contactCcon: _showContactFields ? _contactCcon.trim() : "",
       projectId: _showProjectField ? _projectId.trim() : "",
+      resourceId: _showResourceField ? _resourceId.trim() : "",
+      resourceName: _showResourceField ? _resourceName.trim() : "",
+      providerId: _showProviderField ? _providerId.trim() : "",
+      providerName: _showProviderField ? _providerName.trim() : "",
       keywords: _keywords.where((k) => k.text.trim().isNotEmpty).toList(),
       calculationMode: _calculationMode,
       manualDays: _calculationMode == 'manual' ? _manualDays : 0,
@@ -517,6 +589,20 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
                       ? null
                       : () => setState(() => _showProjectField = true),
                 ),
+              if (!_showResourceField)
+                _buildAddOptionButton(
+                  label: "Cibler une ressource",
+                  onPressed: _clientCsoc.isEmpty
+                      ? null
+                      : () => setState(() => _showResourceField = true),
+                ),
+              if (!_showProviderField)
+                _buildAddOptionButton(
+                  label: "Cibler un fournisseur",
+                  onPressed: _clientCsoc.isEmpty
+                      ? null
+                      : () => setState(() => _showProviderField = true),
+                ),
               if (_keywords.isEmpty)
                 _buildAddOptionButton(
                   label: "Ajouter un mot-clé",
@@ -628,6 +714,110 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
             ],
           ],
 
+          // Champ Ressource ciblée
+          if (_showResourceField && _clientCsoc.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                const Text("RESSOURCE CIBLÉE", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: VivColors.gray500)),
+                const Spacer(),
+                GestureDetector(
+                  onTap: () => setState(() {
+                    _showResourceField = false;
+                    _resourceId = "";
+                    _resourceName = "";
+                  }),
+                  child: const Icon(LucideIcons.circleMinus, size: 16, color: Colors.redAccent),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            _allResources.isEmpty
+                ? const Text("Aucune ressource disponible.", style: TextStyle(fontSize: 12, color: Colors.redAccent))
+                : ShadSelect<String>(
+                    placeholder: const Text("Sélectionnez une ressource"),
+                    initialValue: _resourceId.isNotEmpty ? _resourceId : null,
+                    options: _allResources.map((res) {
+                      return ShadOption(
+                        value: res['id']!,
+                        child: Text("${res['name']} (COMP${res['id']})"),
+                      );
+                    }).toList(),
+                    selectedOptionBuilder: (context, value) {
+                      final found = _allResources.firstWhere((r) => r['id'] == value, orElse: () => {'name': ''});
+                      return Text(found['name']!.isNotEmpty ? "${found['name']} (COMP$value)" : '');
+                    },
+                    onChanged: (val) {
+                      if (val != null) {
+                        final found = _allResources.firstWhere((r) => r['id'] == val, orElse: () => {'name': ''});
+                        setState(() {
+                          _resourceId = val;
+                          _resourceName = found['name'] ?? '';
+                        });
+                      }
+                    },
+                  ),
+            if (_resourceId.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                "Identifiant résolu : COMP$_resourceId",
+                style: const TextStyle(color: Colors.teal, fontWeight: FontWeight.bold, fontSize: 11),
+              ),
+            ],
+          ],
+
+          // Champ Fournisseur ciblé
+          if (_showProviderField && _clientCsoc.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                const Text("FOURNISSEUR CIBLÉ", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: VivColors.gray500)),
+                const Spacer(),
+                GestureDetector(
+                  onTap: () => setState(() {
+                    _showProviderField = false;
+                    _providerId = "";
+                    _providerName = "";
+                  }),
+                  child: const Icon(LucideIcons.circleMinus, size: 16, color: Colors.redAccent),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            _allProviders.isEmpty
+                ? const Text("Aucun fournisseur disponible.", style: TextStyle(fontSize: 12, color: Colors.redAccent))
+                : ShadSelect<String>(
+                    placeholder: const Text("Sélectionnez un fournisseur"),
+                    initialValue: _providerId.isNotEmpty ? _providerId : null,
+                    options: _allProviders.map((provider) {
+                      return ShadOption(
+                        value: provider['id']!,
+                        child: Text("${provider['name']} (CSOC${provider['id']})"),
+                      );
+                    }).toList(),
+                    selectedOptionBuilder: (context, value) {
+                      final found = _allProviders.firstWhere((p) => p['id'] == value, orElse: () => {'name': ''});
+                      return Text(found['name']!.isNotEmpty ? "${found['name']} (CSOC$value)" : '');
+                    },
+                    onChanged: (val) {
+                      if (val != null) {
+                        final found = _allProviders.firstWhere((p) => p['id'] == val, orElse: () => {'name': ''});
+                        setState(() {
+                          _providerId = val;
+                          _providerName = found['name'] ?? '';
+                        });
+                      }
+                    },
+                  ),
+            if (_providerId.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                "Identifiant résolu : CSOC$_providerId",
+                style: const TextStyle(color: Colors.teal, fontWeight: FontWeight.bold, fontSize: 11),
+              ),
+            ],
+          ],
+
           // Liste des mots-clés de prestation (Seulement si client sélectionné)
           if (_keywords.isNotEmpty && _clientCsoc.isNotEmpty) ...[
             const SizedBox(height: 20),
@@ -651,6 +841,26 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
                 final kw = _keywords[index];
                 return Row(
                   children: [
+                    SizedBox(
+                      width: 140,
+                      child: ShadSelect<bool>(
+                        initialValue: kw.isNegative,
+                        options: const [
+                          ShadOption(value: false, child: Text("Contient")),
+                          ShadOption(value: true, child: Text("Ne contient pas")),
+                        ],
+                        selectedOptionBuilder: (context, value) => Text(
+                          value == true ? "Ne contient pas" : "Contient",
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: value == true ? Colors.redAccent.shade700 : VivColors.ink700,
+                          ),
+                        ),
+                        onChanged: (val) => setState(() => kw.isNegative = val ?? false),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
                     Expanded(
                       child: ShadInput(
                         placeholder: const Text("Mot-clé"),
@@ -658,7 +868,7 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
                         onChanged: (val) => setState(() => kw.text = val),
                       ),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 8),
                     Row(
                       children: [
                         Checkbox(
@@ -669,7 +879,7 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
                         const Text("Casse", style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
                       ],
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 4),
                     IconButton(
                       icon: const Icon(LucideIcons.trash2, color: Colors.redAccent, size: 16),
                       onPressed: () => setState(() => _keywords.removeAt(index)),
@@ -869,11 +1079,23 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
                             ),
                           if (rule.projectId.isNotEmpty)
                             _buildListDetailLine(label: "Projet ciblé", value: "PRJ${rule.projectId}"),
-                          if (rule.keywords.isNotEmpty)
+                          if (rule.resourceId.isNotEmpty)
                             _buildListDetailLine(
-                              label: "Prestation contient",
-                              value: rule.keywords.map((k) => "'${k.text}' ${k.caseSensitive ? '[Aa]' : ''}").join(', '),
+                              label: "Ressource",
+                              value: "${rule.resourceName.isNotEmpty ? rule.resourceName : 'Ressource'} (COMP${rule.resourceId})",
                             ),
+                          if (rule.providerId.isNotEmpty)
+                            _buildListDetailLine(
+                              label: "Fournisseur",
+                              value: "${rule.providerName.isNotEmpty ? rule.providerName : 'Fournisseur'} (CSOC${rule.providerId})",
+                            ),
+                          if (rule.keywords.isNotEmpty) ...[
+                            for (var k in rule.keywords)
+                              _buildListDetailLine(
+                                label: k.isNegative ? "Intitulé NE contient PAS" : "Intitulé contient",
+                                value: "'${k.text}' ${k.caseSensitive ? '[Aa]' : ''}",
+                              ),
+                          ],
 
                           const SizedBox(height: 8),
                           const Divider(height: 1, color: VivColors.gray100),
