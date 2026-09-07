@@ -6,6 +6,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:opsis_app/screens/bdc_screen.dart'; // Pour importer BdcPrestaStep2
+import 'package:opsis_app/services/calendar_service.dart';
 import 'package:image/image.dart' as img;
 
 class BdcPdfService {
@@ -13,8 +14,9 @@ class BdcPdfService {
   static Future<Uint8List> generateBdcPdf(
     List<BdcPrestaStep2> prestas,
     String periodMonth,
-    String periodYear,
-  ) async {
+    String periodYear, {
+    List<String> holidays = const [],
+  }) async {
     assert(prestas.isNotEmpty);
     final firstPresta = prestas.first;
     final pdf = pw.Document();
@@ -277,37 +279,65 @@ class BdcPdfService {
                         alignment: pw.Alignment.centerRight,
                         child: pw.Container(
                           width: 320, // Alignement à droite dynamique et lisible
-                          child: pw.Column(
-                            crossAxisAlignment: pw.CrossAxisAlignment.end,
-                            children: [
-                              pw.Row(
-                                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                          child: pw.Builder(
+                            builder: (context) {
+                              // Calcul des jours ouvrés du mois
+                              final m = int.tryParse(periodMonth) ?? DateTime.now().month;
+                              final y = int.tryParse(periodYear) ?? DateTime.now().year;
+                              final startOfMonth = DateTime(y, m, 1);
+                              final endOfMonth = m == 12 ? DateTime(y + 1, 1, 0) : DateTime(y, m + 1, 0);
+                              final maxWorkingDays = CalendarService.calculateWorkingDays(
+                                start: startOfMonth,
+                                end: endOfMonth,
+                                holidays: holidays,
+                              );
+
+                              final rawTotalUo = prestas.fold<double>(0, (sum, p) => sum + p.uoCount);
+                              final bool isCapped = rawTotalUo > maxWorkingDays;
+                              final double effectiveUo = isCapped ? maxWorkingDays.toDouble() : rawTotalUo;
+
+                              // Si plafonné, calcul du montant avec le prix unitaire le plus élevé du tableau
+                              final double effectiveTotalHt;
+                              if (isCapped) {
+                                final highestTjm = prestas.fold<double>(0, (max, p) => p.tjm > max ? p.tjm : max);
+                                effectiveTotalHt = effectiveUo * highestTjm;
+                              } else {
+                                effectiveTotalHt = prestas.fold<double>(0, (sum, p) => sum + p.totalHt);
+                              }
+
+                              return pw.Column(
+                                crossAxisAlignment: pw.CrossAxisAlignment.end,
                                 children: [
-                                  pw.Text(
-                                    "Nombre maximum d'UO autorisé",
-                                    style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+                                  pw.Row(
+                                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      pw.Text(
+                                        "Nombre maximum d'UO autorisé",
+                                        style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+                                      ),
+                                      pw.Text(
+                                        effectiveUo.toStringAsFixed(2),
+                                        style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+                                      ),
+                                    ],
                                   ),
-                                  pw.Text(
-                                    prestas.fold<double>(0, (sum, p) => sum + p.uoCount).toStringAsFixed(2),
-                                    style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+                                  pw.SizedBox(height: 3),
+                                  pw.Row(
+                                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      pw.Text(
+                                        "Montant maximum HT EUR (non engageant)",
+                                        style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+                                      ),
+                                      pw.Text(
+                                        "${effectiveTotalHt.toStringAsFixed(2)} €",
+                                        style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+                                      ),
+                                    ],
                                   ),
                                 ],
-                              ),
-                              pw.SizedBox(height: 3),
-                              pw.Row(
-                                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                                children: [
-                                  pw.Text(
-                                    "Montant maximum HT EUR (non engageant)",
-                                    style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
-                                  ),
-                                  pw.Text(
-                                    "${prestas.fold<double>(0, (sum, p) => sum + p.totalHt).toStringAsFixed(2)} €",
-                                    style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
-                                  ),
-                                ],
-                              ),
-                            ],
+                              );
+                            },
                           ),
                         ),
                       ),

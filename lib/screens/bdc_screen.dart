@@ -1416,7 +1416,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
       
       Uint8List? pdfBytes;
       try {
-        pdfBytes = await BdcPdfService.generateBdcPdf(providerPrestas, _selectedMonth, _selectedYear);
+        pdfBytes = await BdcPdfService.generateBdcPdf(providerPrestas, _selectedMonth, _selectedYear, holidays: _holidays);
       } catch (e) {
         setState(() {
           item.status = 'failed';
@@ -1494,6 +1494,23 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
             await sigFile.delete();
           } catch (_) {}
 
+          // Calculer les totaux effectifs (avec plafonnement éventuel) pour les logs
+          final m = int.tryParse(_selectedMonth) ?? DateTime.now().month;
+          final y = int.tryParse(_selectedYear) ?? DateTime.now().year;
+          final startOfMonth = DateTime(y, m, 1);
+          final endOfMonth = m == 12 ? DateTime(y + 1, 1, 0) : DateTime(y, m + 1, 0);
+          final maxWorkingDays = CalendarService.calculateWorkingDays(
+            start: startOfMonth,
+            end: endOfMonth,
+            holidays: _holidays,
+          );
+          final rawTotalUo = providerPrestas.fold<double>(0, (sum, p) => sum + p.uoCount);
+          final bool isCapped = rawTotalUo > maxWorkingDays;
+          final double effectiveUo = isCapped ? maxWorkingDays.toDouble() : rawTotalUo;
+          final double effectiveTotalHt = isCapped
+              ? effectiveUo * providerPrestas.fold<double>(0, (max, p) => p.tjm > max ? p.tjm : max)
+              : providerPrestas.fold<double>(0, (sum, p) => sum + p.totalHt);
+
           // 2. Sauvegarder dans Sembast + disque physique local
           await logsService.logSentBdc(
             providerId: providerId,
@@ -1504,8 +1521,8 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
             period: period,
             sentToEmail: item.email,
             bdcNumber: bdcNumber,
-            uoCount: providerPrestas.fold<double>(0, (sum, p) => sum + p.uoCount),
-            totalHt: providerPrestas.fold<double>(0, (sum, p) => sum + p.totalHt),
+            uoCount: effectiveUo,
+            totalHt: effectiveTotalHt,
             pdfBytes: pdfBytes,
           );
 
@@ -1558,7 +1575,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
         
         Uint8List? pdfBytes;
         try {
-          pdfBytes = await BdcPdfService.generateBdcPdf(providerPrestas, _selectedMonth, _selectedYear);
+          pdfBytes = await BdcPdfService.generateBdcPdf(providerPrestas, _selectedMonth, _selectedYear, holidays: _holidays);
           
           setState(() {
             item.status = 'sending';
@@ -1617,6 +1634,23 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
             await sigFile.delete();
           } catch (_) {}
 
+          // Calculer les totaux effectifs (avec plafonnement éventuel) pour les logs
+          final m = int.tryParse(_selectedMonth) ?? DateTime.now().month;
+          final y = int.tryParse(_selectedYear) ?? DateTime.now().year;
+          final startOfMonth = DateTime(y, m, 1);
+          final endOfMonth = m == 12 ? DateTime(y + 1, 1, 0) : DateTime(y, m + 1, 0);
+          final maxWorkingDays = CalendarService.calculateWorkingDays(
+            start: startOfMonth,
+            end: endOfMonth,
+            holidays: _holidays,
+          );
+          final rawTotalUo = providerPrestas.fold<double>(0, (sum, p) => sum + p.uoCount);
+          final bool isCapped = rawTotalUo > maxWorkingDays;
+          final double effectiveUo = isCapped ? maxWorkingDays.toDouble() : rawTotalUo;
+          final double effectiveTotalHt = isCapped
+              ? effectiveUo * providerPrestas.fold<double>(0, (max, p) => p.tjm > max ? p.tjm : max)
+              : providerPrestas.fold<double>(0, (sum, p) => sum + p.totalHt);
+
           // 2. Sauvegarder dans Sembast + disque physique local
           await logsService.logSentBdc(
             providerId: providerId,
@@ -1627,8 +1661,8 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
             period: period,
             sentToEmail: item.email,
             bdcNumber: bdcNumber,
-            uoCount: providerPrestas.fold<double>(0, (sum, p) => sum + p.uoCount),
-            totalHt: providerPrestas.fold<double>(0, (sum, p) => sum + p.totalHt),
+            uoCount: effectiveUo,
+            totalHt: effectiveTotalHt,
             pdfBytes: pdfBytes,
           );
 
@@ -2469,9 +2503,28 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
               itemBuilder: (context, groupIndex) {
                 final group = providerGroups[groupIndex];
                 final isExpanded = _expandedProviders[group.providerId] ?? true;
-                
-                final totalUo = group.items.fold<double>(0, (sum, p) => sum + p.uoCount);
-                final totalHt = group.items.fold<double>(0, (sum, p) => sum + p.totalHt);
+
+                // Calculer les jours ouvrés du mois pour le plafonnement de groupe
+                final m = int.tryParse(_selectedMonth) ?? DateTime.now().month;
+                final y = int.tryParse(_selectedYear) ?? DateTime.now().year;
+                final startOfMonth = DateTime(y, m, 1);
+                final endOfMonth = m == 12 ? DateTime(y + 1, 1, 0) : DateTime(y, m + 1, 0);
+                final maxWorkingDays = CalendarService.calculateWorkingDays(
+                  start: startOfMonth,
+                  end: endOfMonth,
+                  holidays: _holidays,
+                );
+
+                final rawTotalUo = group.items.fold<double>(0, (sum, p) => sum + p.uoCount);
+                final bool isCapped = rawTotalUo > maxWorkingDays;
+                final double totalUo = isCapped ? maxWorkingDays.toDouble() : rawTotalUo;
+                final double totalHt;
+                if (isCapped) {
+                  final highestTjm = group.items.fold<double>(0, (max, p) => p.tjm > max ? p.tjm : max);
+                  totalHt = totalUo * highestTjm;
+                } else {
+                  totalHt = group.items.fold<double>(0, (sum, p) => sum + p.totalHt);
+                }
 
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -2906,7 +2959,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
               const Divider(),
               Expanded(
                 child: PdfPreview(
-                  build: (format) => BdcPdfService.generateBdcPdf(providerPrestas, _selectedMonth, _selectedYear),
+                  build: (format) => BdcPdfService.generateBdcPdf(providerPrestas, _selectedMonth, _selectedYear, holidays: _holidays),
                   allowPrinting: false,
                   allowSharing: false,
                   canChangePageFormat: false,
@@ -2923,7 +2976,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
   void _downloadPdf(BdcPrestaStep2 item) async {
     try {
       final providerPrestas = _step2Calculated.where((x) => x.providerId == item.providerId).toList();
-      final bytes = await BdcPdfService.generateBdcPdf(providerPrestas, _selectedMonth, _selectedYear);
+      final bytes = await BdcPdfService.generateBdcPdf(providerPrestas, _selectedMonth, _selectedYear, holidays: _holidays);
       final yearSuffix = _selectedYear.substring(_selectedYear.length - 2);
       final filename = 'VIV-PO-CSOC${item.providerId}-$yearSuffix$_selectedMonth.pdf';
       await Printing.sharePdf(bytes: bytes, filename: filename);
