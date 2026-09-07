@@ -1168,16 +1168,18 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
 
       if (matchedRule != null) {
         ruleName = matchedRule.clientName.isNotEmpty 
-            ? "${matchedRule.clientName} (Règle appliquée)"
-            : "Règle appliquée";
+            ? matchedRule.clientName 
+            : matchedRule.id;
         
         // Mode de calcul
         if (matchedRule.calculationMode == 'manual') {
           modeName = "Fixe Manuel";
           uoCount = matchedRule.manualDays.round();
         } else if (matchedRule.calculationMode == 'sold') {
-          modeName = "Jours Vendus";
-          uoCount = c.quantitySold.round();
+          modeName = "Jours Vendus (Plafonné)";
+          final sold = c.quantitySold.round();
+          // Plafonner le nombre d'UO aux jours ouvrés de la période
+          uoCount = (sold > 0 && sold < standardWorkingDays) ? sold : standardWorkingDays;
         } else {
           modeName = "Standard";
           uoCount = standardWorkingDays;
