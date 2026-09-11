@@ -90,8 +90,8 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
     final service = ref.read(boondServiceProvider);
 
     try {
-      // 1. Récupérer les projets actifs avec inclusion de la société cliente
-      final response = await service.getProjectsWithInclusions(
+      // 1. Récupérer TOUS les projets actifs avec inclusion de la société cliente (paginé)
+      final response = await service.getAllProjectsWithInclusions(
         filters: {'states[]': 1},
         inclusions: ['company'],
       );
@@ -131,10 +131,10 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
         }
       }
 
-      // 2. Récupérer les ressources actives (state == 1)
+      // 2. Récupérer TOUTES les ressources actives (state == 1) paginées
       List<Map<String, dynamic>> loadedResources = [];
       try {
-        final resourcesRaw = await service.searchResources('');
+        final resourcesRaw = await service.getAllResources(filters: {'states[]': 1});
         for (var r in resourcesRaw) {
           final id = r['id']?.toString() ?? '';
           final rAttr = r['attributes'] as Map<String, dynamic>? ?? {};
@@ -149,10 +149,10 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
         loadedResources.sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
       } catch (_) {}
 
-      // 3. Récupérer les fournisseurs (sociétés de type fournisseur ou toutes sociétés)
+      // 3. Récupérer TOUS les fournisseurs / sociétés paginés
       List<Map<String, dynamic>> loadedProviders = [];
       try {
-        final companiesRaw = await service.searchCompanies('');
+        final companiesRaw = await service.getAllCompanies();
         for (var comp in companiesRaw) {
           final id = comp['id']?.toString() ?? '';
           final compAttr = comp['attributes'] as Map<String, dynamic>? ?? {};

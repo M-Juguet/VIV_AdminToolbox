@@ -541,13 +541,87 @@ class BoondService {
     }
   }
 
-  /// Récupère les contacts d'une société
-  Future<List<dynamic>> getCompanyContacts(int id) async {
+  /// Récupère TOUS les contacts d'une société (gestion complète et robuste de la pagination BoondManager)
+  Future<List<dynamic>> getCompanyContacts(
+    int id, {
+    bool forceRefresh = false,
+    int maxPages = 50,
+    int maxResultsPerPage = 100,
+  }) async {
+    final cacheKey = 'company_${id}_contacts_all';
+    final cache = BoondCacheService();
+    if (!forceRefresh) {
+      final cachedData = await cache.get(cacheKey, ttl: const Duration(hours: 12));
+      if (cachedData is List) {
+        return List<dynamic>.from(cachedData);
+      }
+    }
+
+    final List<dynamic> allContacts = [];
+    int currentPage = 1;
+    int totalPages = 1;
+    int? totalRows;
+
     try {
-      final response = await _dio.get('companies/$id/contacts');
-      return response.data['data'];
+      do {
+        final Map<String, dynamic> params = {
+          'page': currentPage,
+          'maxResults': maxResultsPerPage,
+          'numberPerPage': maxResultsPerPage,
+        };
+
+        final response = await _dio.get('companies/$id/contacts', queryParameters: params);
+        final dynamic data = response.data['data'];
+        final List<dynamic> contacts = data is List ? data : (data != null ? [data] : []);
+        allContacts.addAll(contacts);
+
+        final dynamic meta = response.data['meta'];
+        int? detectedTotalPages;
+        if (meta is Map) {
+          final dynamic totals = meta['totals'] ?? meta['pagination'];
+          if (totals is Map) {
+            detectedTotalPages = int.tryParse(totals['totalPages']?.toString() ?? '') ??
+                int.tryParse(totals['pages']?.toString() ?? '') ??
+                int.tryParse(totals['nbPages']?.toString() ?? '');
+            totalRows = int.tryParse(totals['rows']?.toString() ?? '') ??
+                int.tryParse(totals['total']?.toString() ?? '') ??
+                int.tryParse(totals['totalRows']?.toString() ?? '') ??
+                int.tryParse(totals['count']?.toString() ?? '');
+          } else if (totals is num) {
+            totalRows = totals.toInt();
+          }
+
+          detectedTotalPages ??= int.tryParse(meta['totalPages']?.toString() ?? '') ??
+              int.tryParse(meta['pages']?.toString() ?? '');
+          totalRows ??= int.tryParse(meta['rows']?.toString() ?? '') ??
+              int.tryParse(meta['total']?.toString() ?? '') ??
+              int.tryParse(meta['count']?.toString() ?? '');
+        }
+
+        if (detectedTotalPages != null && detectedTotalPages > 0) {
+          totalPages = detectedTotalPages;
+        } else if (totalRows != null && totalRows > 0) {
+          totalPages = (totalRows / maxResultsPerPage).ceil();
+        } else if (contacts.length >= maxResultsPerPage) {
+          totalPages = currentPage + 1;
+        } else {
+          break;
+        }
+
+        currentPage++;
+      } while (currentPage <= totalPages && currentPage <= maxPages);
+
+      await cache.put(cacheKey, allContacts);
+      return allContacts;
     } catch (e) {
-      throw e.toString();
+      if (allContacts.isNotEmpty) return allContacts;
+      try {
+        final response = await _dio.get('companies/$id/contacts');
+        final dynamic data = response.data['data'];
+        return data is List ? data : (data != null ? [data] : []);
+      } catch (_) {
+        throw 'Erreur lors de la récupération des contacts de la société $id : $e';
+      }
     }
   }
 
@@ -689,8 +763,89 @@ class BoondService {
     }
   }
 
+  /// Récupère TOUTES les ressources (gestion complète et robuste de la pagination BoondManager avec cache)
+  Future<List<dynamic>> getAllResources({
+    Map<String, dynamic>? filters,
+    bool forceRefresh = false,
+    int maxPages = 50,
+    int maxResultsPerPage = 100,
+  }) async {
+    final Map<String, dynamic> baseParams = Map.from(filters ?? {});
+    final cacheKey = 'all_resources_${jsonEncode(baseParams)}';
+    final cache = BoondCacheService();
+    if (!forceRefresh) {
+      final cachedData = await cache.get(cacheKey, ttl: const Duration(hours: 12));
+      if (cachedData is List) {
+        return List<dynamic>.from(cachedData);
+      }
+    }
+
+    final List<dynamic> allResources = [];
+    int currentPage = 1;
+    int totalPages = 1;
+    int? totalRows;
+
+    try {
+      do {
+        final Map<String, dynamic> params = Map.from(baseParams);
+        params['page'] = currentPage;
+        params['maxResults'] = maxResultsPerPage;
+        params['numberPerPage'] = maxResultsPerPage;
+
+        final response = await _dio.get('resources', queryParameters: params);
+        final dynamic data = response.data['data'];
+        final List<dynamic> pageList = data is List ? data : (data != null ? [data] : []);
+        allResources.addAll(pageList);
+
+        final dynamic meta = response.data['meta'];
+        int? detectedTotalPages;
+        if (meta is Map) {
+          final dynamic totals = meta['totals'] ?? meta['pagination'];
+          if (totals is Map) {
+            detectedTotalPages = int.tryParse(totals['totalPages']?.toString() ?? '') ??
+                int.tryParse(totals['pages']?.toString() ?? '') ??
+                int.tryParse(totals['nbPages']?.toString() ?? '');
+            totalRows = int.tryParse(totals['rows']?.toString() ?? '') ??
+                int.tryParse(totals['total']?.toString() ?? '') ??
+                int.tryParse(totals['totalRows']?.toString() ?? '') ??
+                int.tryParse(totals['count']?.toString() ?? '');
+          } else if (totals is num) {
+            totalRows = totals.toInt();
+          }
+
+          detectedTotalPages ??= int.tryParse(meta['totalPages']?.toString() ?? '') ??
+              int.tryParse(meta['pages']?.toString() ?? '');
+          totalRows ??= int.tryParse(meta['rows']?.toString() ?? '') ??
+              int.tryParse(meta['total']?.toString() ?? '') ??
+              int.tryParse(meta['count']?.toString() ?? '');
+        }
+
+        if (detectedTotalPages != null && detectedTotalPages > 0) {
+          totalPages = detectedTotalPages;
+        } else if (totalRows != null && totalRows > 0) {
+          totalPages = (totalRows / maxResultsPerPage).ceil();
+        } else if (pageList.length >= maxResultsPerPage) {
+          totalPages = currentPage + 1;
+        } else {
+          break;
+        }
+
+        currentPage++;
+      } while (currentPage <= totalPages && currentPage <= maxPages);
+
+      await cache.put(cacheKey, allResources);
+      return allResources;
+    } catch (e) {
+      if (allResources.isNotEmpty) return allResources;
+      throw 'Erreur lors de la récupération des ressources : $e';
+    }
+  }
+
   /// Recherche des ressources avec des mots clés (nom, prénom, email, référence)
-  Future<List<dynamic>> searchResources(String keywords) async {
+  Future<List<dynamic>> searchResources(String keywords, {bool fetchAllPages = false}) async {
+    if (keywords.trim().isEmpty || fetchAllPages) {
+      return await getAllResources();
+    }
     try {
       final response = await _dio.get('resources', queryParameters: {'keywords': keywords});
       return response.data['data'] as List? ?? [];
@@ -714,8 +869,89 @@ class BoondService {
     return await _dio.put('resources/$id/administrative', data: payload);
   }
 
+  /// Récupère TOUTES les sociétés (gestion complète et robuste de la pagination BoondManager avec cache)
+  Future<List<dynamic>> getAllCompanies({
+    Map<String, dynamic>? filters,
+    bool forceRefresh = false,
+    int maxPages = 50,
+    int maxResultsPerPage = 100,
+  }) async {
+    final Map<String, dynamic> baseParams = Map.from(filters ?? {});
+    final cacheKey = 'all_companies_${jsonEncode(baseParams)}';
+    final cache = BoondCacheService();
+    if (!forceRefresh) {
+      final cachedData = await cache.get(cacheKey, ttl: const Duration(hours: 12));
+      if (cachedData is List) {
+        return List<dynamic>.from(cachedData);
+      }
+    }
+
+    final List<dynamic> allCompanies = [];
+    int currentPage = 1;
+    int totalPages = 1;
+    int? totalRows;
+
+    try {
+      do {
+        final Map<String, dynamic> params = Map.from(baseParams);
+        params['page'] = currentPage;
+        params['maxResults'] = maxResultsPerPage;
+        params['numberPerPage'] = maxResultsPerPage;
+
+        final response = await _dio.get('companies', queryParameters: params);
+        final dynamic data = response.data['data'];
+        final List<dynamic> pageList = data is List ? data : (data != null ? [data] : []);
+        allCompanies.addAll(pageList);
+
+        final dynamic meta = response.data['meta'];
+        int? detectedTotalPages;
+        if (meta is Map) {
+          final dynamic totals = meta['totals'] ?? meta['pagination'];
+          if (totals is Map) {
+            detectedTotalPages = int.tryParse(totals['totalPages']?.toString() ?? '') ??
+                int.tryParse(totals['pages']?.toString() ?? '') ??
+                int.tryParse(totals['nbPages']?.toString() ?? '');
+            totalRows = int.tryParse(totals['rows']?.toString() ?? '') ??
+                int.tryParse(totals['total']?.toString() ?? '') ??
+                int.tryParse(totals['totalRows']?.toString() ?? '') ??
+                int.tryParse(totals['count']?.toString() ?? '');
+          } else if (totals is num) {
+            totalRows = totals.toInt();
+          }
+
+          detectedTotalPages ??= int.tryParse(meta['totalPages']?.toString() ?? '') ??
+              int.tryParse(meta['pages']?.toString() ?? '');
+          totalRows ??= int.tryParse(meta['rows']?.toString() ?? '') ??
+              int.tryParse(meta['total']?.toString() ?? '') ??
+              int.tryParse(meta['count']?.toString() ?? '');
+        }
+
+        if (detectedTotalPages != null && detectedTotalPages > 0) {
+          totalPages = detectedTotalPages;
+        } else if (totalRows != null && totalRows > 0) {
+          totalPages = (totalRows / maxResultsPerPage).ceil();
+        } else if (pageList.length >= maxResultsPerPage) {
+          totalPages = currentPage + 1;
+        } else {
+          break;
+        }
+
+        currentPage++;
+      } while (currentPage <= totalPages && currentPage <= maxPages);
+
+      await cache.put(cacheKey, allCompanies);
+      return allCompanies;
+    } catch (e) {
+      if (allCompanies.isNotEmpty) return allCompanies;
+      throw 'Erreur lors de la récupération des sociétés : $e';
+    }
+  }
+
   /// Recherche des sociétés avec des mots clés (nom, SIREN, TVA, etc.)
-  Future<List<dynamic>> searchCompanies(String keywords) async {
+  Future<List<dynamic>> searchCompanies(String keywords, {bool fetchAllPages = false}) async {
+    if (keywords.trim().isEmpty || fetchAllPages) {
+      return await getAllCompanies();
+    }
     try {
       final response = await _dio.get('companies', queryParameters: {'keywords': keywords});
       return response.data['data'] as List? ?? [];
