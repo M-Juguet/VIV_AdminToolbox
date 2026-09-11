@@ -16,6 +16,7 @@ class BdcPdfService {
     String periodMonth,
     String periodYear, {
     List<String> holidays = const [],
+    bool isPortage = false,
   }) async {
     assert(prestas.isNotEmpty);
     final firstPresta = prestas.first;
@@ -293,7 +294,7 @@ class BdcPdfService {
                               );
 
                               final rawTotalUo = prestas.fold<double>(0, (sum, p) => sum + p.uoCount);
-                              final bool isCapped = rawTotalUo > maxWorkingDays;
+                              final bool isCapped = !isPortage && (rawTotalUo > maxWorkingDays);
                               final double effectiveUo = isCapped ? maxWorkingDays.toDouble() : rawTotalUo;
 
                               // Si plafonné, calcul du montant avec le prix unitaire le plus élevé du tableau

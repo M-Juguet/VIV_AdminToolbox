@@ -192,11 +192,17 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
   }
   bool get _isCurrentPeriodDetected => _periodDetectionStatus[_currentPeriodKey] ?? false;
 
-  // Données de session mockées
   late List<BdcPrestaStep1> _step1Candidates;
   List<BdcPrestaStep2> _step2Calculated = [];
   List<BdcMailStatus> _smtpStatusList = [];
   List<String> _holidays = [];
+  List<BdcRule> _loadedRules = [];
+
+  bool _isPortageProvider(String providerId) {
+    return _loadedRules.any((r) =>
+        r.isPortage &&
+        (r.providerId == providerId || (r.providerId.isEmpty && r.clientCsoc.isEmpty)));
+  }
 
   @override
   void initState() {
@@ -1090,6 +1096,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
     
     // Charger les règles de facturation utilisateur depuis bdc_rules.json
     final rules = await BdcRulesService().loadRules();
+    _loadedRules = rules;
     
     final List<BdcPrestaStep2> results = [];
     final monthInt = int.tryParse(_selectedMonth) ?? DateTime.now().month;
@@ -1417,7 +1424,14 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
       
       Uint8List? pdfBytes;
       try {
-        pdfBytes = await BdcPdfService.generateBdcPdf(providerPrestas, _selectedMonth, _selectedYear, holidays: _holidays);
+        final isPortage = _isPortageProvider(providerId);
+        pdfBytes = await BdcPdfService.generateBdcPdf(
+          providerPrestas,
+          _selectedMonth,
+          _selectedYear,
+          holidays: _holidays,
+          isPortage: isPortage,
+        );
       } catch (e) {
         setState(() {
           item.status = 'failed';
@@ -1505,8 +1519,9 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
             end: endOfMonth,
             holidays: _holidays,
           );
+          final isPortage = _isPortageProvider(providerId);
           final rawTotalUo = providerPrestas.fold<double>(0, (sum, p) => sum + p.uoCount);
-          final bool isCapped = rawTotalUo > maxWorkingDays;
+          final bool isCapped = !isPortage && (rawTotalUo > maxWorkingDays);
           final double effectiveUo = isCapped ? maxWorkingDays.toDouble() : rawTotalUo;
           final double effectiveTotalHt = isCapped
               ? effectiveUo * providerPrestas.fold<double>(0, (max, p) => p.tjm > max ? p.tjm : max)
@@ -1576,7 +1591,14 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
         
         Uint8List? pdfBytes;
         try {
-          pdfBytes = await BdcPdfService.generateBdcPdf(providerPrestas, _selectedMonth, _selectedYear, holidays: _holidays);
+          final isPortage = _isPortageProvider(providerId);
+          pdfBytes = await BdcPdfService.generateBdcPdf(
+            providerPrestas,
+            _selectedMonth,
+            _selectedYear,
+            holidays: _holidays,
+            isPortage: isPortage,
+          );
           
           setState(() {
             item.status = 'sending';
@@ -1646,7 +1668,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
             holidays: _holidays,
           );
           final rawTotalUo = providerPrestas.fold<double>(0, (sum, p) => sum + p.uoCount);
-          final bool isCapped = rawTotalUo > maxWorkingDays;
+          final bool isCapped = !isPortage && (rawTotalUo > maxWorkingDays);
           final double effectiveUo = isCapped ? maxWorkingDays.toDouble() : rawTotalUo;
           final double effectiveTotalHt = isCapped
               ? effectiveUo * providerPrestas.fold<double>(0, (max, p) => p.tjm > max ? p.tjm : max)
@@ -2573,8 +2595,9 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                   holidays: _holidays,
                 );
 
+                final isPortage = _isPortageProvider(group.providerId);
                 final rawTotalUo = group.items.fold<double>(0, (sum, p) => sum + p.uoCount);
-                final bool isCapped = rawTotalUo > maxWorkingDays;
+                final bool isCapped = !isPortage && (rawTotalUo > maxWorkingDays);
                 final double totalUo = isCapped ? maxWorkingDays.toDouble() : rawTotalUo;
                 final double totalHt;
                 if (isCapped) {
@@ -2611,18 +2634,42 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  group.providerName.toUpperCase(),
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 12,
-                                    color: VivColors.gray500,
-                                    letterSpacing: 0.5,
-                                  ),
+                                Row(
+                                  children: [
+                                    Text(
+                                      group.providerName.toUpperCase(),
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 12,
+                                        color: VivColors.gray500,
+                                        letterSpacing: 0.5,
+                                      ),
+                                    ),
+                                    if (isPortage) ...[
+                                      const SizedBox(width: 8),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: Colors.teal.withAlpha((0.15 * 255).round()),
+                                          borderRadius: BorderRadius.circular(4),
+                                          border: Border.all(color: Colors.teal.shade300, width: 0.5),
+                                        ),
+                                        child: const Text(
+                                          "PORTAGE",
+                                          style: TextStyle(
+                                            color: Colors.teal,
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 9,
+                                            letterSpacing: 0.5,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ],
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  "${totalHt.toStringAsFixed(0)} € HT consolidés (${totalUo.toStringAsFixed(1)} UO total)",
+                                  "${totalHt.toStringAsFixed(0)} € HT consolidés (${totalUo.toStringAsFixed(1)} UO total)${isPortage ? ' - Portage' : ''}",
                                   style: const TextStyle(fontSize: 10, color: VivColors.gray400, fontWeight: FontWeight.w500),
                                 ),
                               ],
@@ -2992,6 +3039,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
 
   void _viewPdf(BdcPrestaStep2 item) {
     final providerPrestas = _step2Calculated.where((x) => x.providerId == item.providerId).toList();
+    final isPortage = _isPortageProvider(item.providerId);
     showDialog(
       context: context,
       builder: (context) => Dialog(
@@ -3005,7 +3053,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    "Aperçu du Bon de commande : ${item.providerName}",
+                    "Aperçu du Bon de commande : ${item.providerName}${isPortage ? ' (Portage)' : ''}",
                     style: VivTypography.h4.copyWith(fontSize: 16),
                   ),
                   IconButton(
@@ -3017,7 +3065,13 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
               const Divider(),
               Expanded(
                 child: PdfPreview(
-                  build: (format) => BdcPdfService.generateBdcPdf(providerPrestas, _selectedMonth, _selectedYear, holidays: _holidays),
+                  build: (format) => BdcPdfService.generateBdcPdf(
+                    providerPrestas,
+                    _selectedMonth,
+                    _selectedYear,
+                    holidays: _holidays,
+                    isPortage: isPortage,
+                  ),
                   allowPrinting: false,
                   allowSharing: false,
                   canChangePageFormat: false,
@@ -3034,7 +3088,14 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
   void _downloadPdf(BdcPrestaStep2 item) async {
     try {
       final providerPrestas = _step2Calculated.where((x) => x.providerId == item.providerId).toList();
-      final bytes = await BdcPdfService.generateBdcPdf(providerPrestas, _selectedMonth, _selectedYear, holidays: _holidays);
+      final isPortage = _isPortageProvider(item.providerId);
+      final bytes = await BdcPdfService.generateBdcPdf(
+        providerPrestas,
+        _selectedMonth,
+        _selectedYear,
+        holidays: _holidays,
+        isPortage: isPortage,
+      );
       final yearSuffix = _selectedYear.substring(_selectedYear.length - 2);
       final filename = 'VIV-PO-CSOC${item.providerId}-$yearSuffix$_selectedMonth.pdf';
       await Printing.sharePdf(bytes: bytes, filename: filename);

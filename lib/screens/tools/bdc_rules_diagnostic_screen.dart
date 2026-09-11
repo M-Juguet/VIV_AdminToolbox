@@ -62,6 +62,7 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
   String _calculationMode = "standard"; 
   double _manualDays = 1.0;
   String _titleMode = "delivery_title"; 
+  bool _isPortage = false; 
 
   @override
   void initState() {
@@ -184,6 +185,21 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
 
   // Se déclenche à la sélection d'un client
   Future<void> _onClientSelected(String clientId) async {
+    if (clientId.isEmpty || clientId == '__ALL__') {
+      setState(() {
+        _clientName = "Tous les clients";
+        _clientCsoc = "";
+        _filteredProjectsForClient = [];
+        _contactName = "";
+        _contactCcon = "";
+        _projectId = "";
+        _showContactFields = false;
+        _showProjectField = false;
+        _clientContacts = [];
+      });
+      return;
+    }
+
     final clientObj = _allClients.firstWhere((c) => c['id'] == clientId, orElse: () => {});
     if (clientObj.isEmpty) return;
 
@@ -266,6 +282,7 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
       _calculationMode = "standard";
       _manualDays = 1.0;
       _titleMode = "delivery_title";
+      _isPortage = false;
       _filteredProjectsForClient = [];
       _clientContacts = [];
     });
@@ -304,6 +321,7 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
       _calculationMode = rule.calculationMode;
       _manualDays = rule.manualDays > 0 ? rule.manualDays : 1.0;
       _titleMode = rule.titleMode;
+      _isPortage = rule.isPortage;
 
       // Restaurer le contexte projets et contacts
       _filteredProjectsForClient = _allProjects.where((p) => p['clientId'] == rule.clientCsoc).toList();
@@ -315,11 +333,11 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
   }
 
   void _saveRule() {
-    if (_clientName.trim().isEmpty || _clientCsoc.trim().isEmpty) {
+    if (_clientName.trim().isEmpty && _clientCsoc.trim().isEmpty && _providerId.trim().isEmpty) {
       ShadToaster.of(context).show(
         const ShadToast.destructive(
           title: Text("Erreur"),
-          description: Text("Veuillez sélectionner un client valide."),
+          description: Text("Veuillez sélectionner un client ou cibler un fournisseur."),
         ),
       );
       return;
@@ -327,7 +345,7 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
 
     final savedRule = BdcRule(
       id: _editingRuleId ?? "R-${_rulesList.length + 1}",
-      clientName: _clientName.trim(),
+      clientName: _clientName.trim().isEmpty ? (_showProviderField && _providerName.isNotEmpty ? "Tous les clients" : "Global") : _clientName.trim(),
       clientCsoc: _clientCsoc.trim(),
       contactName: _showContactFields ? _contactName.trim() : "",
       contactCcon: _showContactFields ? _contactCcon.trim() : "",
@@ -340,6 +358,7 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
       calculationMode: _calculationMode,
       manualDays: _calculationMode == 'manual' ? _manualDays : 0,
       titleMode: _titleMode,
+      isPortage: _isPortage,
     );
 
     setState(() {
@@ -539,16 +558,24 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
           const Text("CLIENT", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: VivColors.gray500)),
           const SizedBox(height: 8),
           ShadSelect<String>(
-            placeholder: const Text("Sélectionner un Client actif"),
-            initialValue: _clientCsoc.isNotEmpty ? _clientCsoc : null,
-            options: _allClients.map((client) {
-              return ShadOption(
-                value: client['id']!,
-                child: Text("${client['name']} (CSOC${client['id']})"),
-              );
-            }).toList(),
+            placeholder: const Text("Sélectionner un Client (ou Tous les clients)"),
+            initialValue: _clientCsoc.isNotEmpty ? _clientCsoc : (_clientName == "Tous les clients" ? '__ALL__' : null),
+            options: [
+              const ShadOption(
+                value: '__ALL__',
+                child: Text("Tous les clients (Global / Portage)"),
+              ),
+              ..._allClients.map((client) {
+                return ShadOption(
+                  value: client['id']!,
+                  child: Text("${client['name']} (CSOC${client['id']})"),
+                );
+              }),
+            ],
             selectedOptionBuilder: (context, value) => Text(
-              _allClients.firstWhere((c) => c['id'] == value, orElse: () => {'name': ''})['name']!,
+              value == '__ALL__' || value.isEmpty
+                  ? "Tous les clients (Global / Portage)"
+                  : (_allClients.firstWhere((c) => c['id'] == value, orElse: () => {'name': ''})['name']!),
             ),
             onChanged: (val) {
               if (val != null) {
@@ -567,7 +594,7 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
 
           const SizedBox(height: 16),
 
-          // Boutons pour déplier les options facultatives (Accessibles uniquement si client sélectionné)
+          // Boutons pour déplier les options facultatives
           Wrap(
             spacing: 12,
             runSpacing: 8,
@@ -592,23 +619,17 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
               if (!_showResourceField)
                 _buildAddOptionButton(
                   label: "Cibler une ressource",
-                  onPressed: _clientCsoc.isEmpty
-                      ? null
-                      : () => setState(() => _showResourceField = true),
+                  onPressed: () => setState(() => _showResourceField = true),
                 ),
               if (!_showProviderField)
                 _buildAddOptionButton(
                   label: "Cibler un fournisseur",
-                  onPressed: _clientCsoc.isEmpty
-                      ? null
-                      : () => setState(() => _showProviderField = true),
+                  onPressed: () => setState(() => _showProviderField = true),
                 ),
               if (_keywords.isEmpty)
                 _buildAddOptionButton(
                   label: "Ajouter un mot-clé",
-                  onPressed: _clientCsoc.isEmpty
-                      ? null
-                      : () => setState(() => _keywords.add(BdcRuleKeyword(text: ""))),
+                  onPressed: () => setState(() => _keywords.add(BdcRuleKeyword(text: ""))),
                 ),
             ],
           ),
@@ -715,7 +736,7 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
           ],
 
           // Champ Ressource ciblée
-          if (_showResourceField && _clientCsoc.isNotEmpty) ...[
+          if (_showResourceField) ...[
             const SizedBox(height: 16),
             Row(
               children: [
@@ -767,7 +788,7 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
           ],
 
           // Champ Fournisseur ciblé
-          if (_showProviderField && _clientCsoc.isNotEmpty) ...[
+          if (_showProviderField) ...[
             const SizedBox(height: 16),
             Row(
               children: [
@@ -818,8 +839,47 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
             ],
           ],
 
-          // Liste des mots-clés de prestation (Seulement si client sélectionné)
-          if (_keywords.isNotEmpty && _clientCsoc.isNotEmpty) ...[
+          // Option Boîte de portage
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: _isPortage ? Colors.teal.withAlpha((0.08 * 255).round()) : VivColors.gray50,
+              borderRadius: BorderRadius.circular(VivSpacing.radiusMd),
+              border: Border.all(
+                color: _isPortage ? Colors.teal.shade300 : VivColors.gray200,
+              ),
+            ),
+            child: Row(
+              children: [
+                Checkbox(
+                  value: _isPortage,
+                  activeColor: Colors.teal.shade700,
+                  onChanged: (val) => setState(() => _isPortage = val ?? false),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        "Fournisseur de type boîte de portage",
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                      ),
+                      const SizedBox(height: 2),
+                      const Text(
+                        "Effectue une somme brute simple des UO et des montants HT de chaque ressource sans plafonnement global.",
+                        style: TextStyle(fontSize: 11, color: VivColors.gray500),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Liste des mots-clés de prestation
+          if (_keywords.isNotEmpty) ...[
             const SizedBox(height: 20),
             Row(
               children: [
@@ -1043,7 +1103,7 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
                           Row(
                             children: [
                               Text(
-                                rule.clientName,
+                                rule.clientName.isNotEmpty ? rule.clientName : "Tous les clients",
                                 style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                               ),
                               if (rule.clientCsoc.isNotEmpty) ...[
@@ -1051,6 +1111,26 @@ class _BdcRulesDiagnosticScreenState extends ConsumerState<BdcRulesDiagnosticScr
                                 Text(
                                   "(CSOC${rule.clientCsoc})",
                                   style: const TextStyle(color: VivColors.gray400, fontSize: 12),
+                                ),
+                              ],
+                              if (rule.isPortage) ...[
+                                const SizedBox(width: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.teal.withAlpha((0.15 * 255).round()),
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(color: Colors.teal.shade300, width: 0.5),
+                                  ),
+                                  child: const Text(
+                                    "PORTAGE",
+                                    style: TextStyle(
+                                      color: Colors.teal,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 9,
+                                      letterSpacing: 0.5,
+                                    ),
+                                  ),
                                 ),
                               ],
                               const Spacer(),

@@ -42,6 +42,7 @@ class BdcRule {
   final String calculationMode; // 'standard', 'sold', 'manual'
   final double manualDays;
   final String titleMode; // 'delivery_title', 'resource_title'
+  final bool isPortage; // true: fournisseur boîte de portage (consolidation somme simple)
 
   BdcRule({
     required this.id,
@@ -58,6 +59,7 @@ class BdcRule {
     required this.calculationMode,
     required this.manualDays,
     required this.titleMode,
+    this.isPortage = false,
   });
 
   Map<String, dynamic> toJson() => {
@@ -75,6 +77,7 @@ class BdcRule {
         'calculationMode': calculationMode,
         'manualDays': manualDays,
         'titleMode': titleMode,
+        'isPortage': isPortage,
       };
 
   factory BdcRule.fromJson(Map<String, dynamic> json) => BdcRule(
@@ -94,6 +97,7 @@ class BdcRule {
         calculationMode: json['calculationMode'] ?? 'standard',
         manualDays: (json['manualDays'] as num? ?? 1.0).toDouble(),
         titleMode: json['titleMode'] ?? 'delivery_title',
+        isPortage: json['isPortage'] ?? false,
       );
 }
 
