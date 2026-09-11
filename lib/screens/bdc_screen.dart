@@ -182,7 +182,8 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
 
   // Mémorisation de détection par période et agence
   final Map<String, bool> _periodDetectionStatus = {};
-  final Map<String, bool> _expandedProviders = {};
+  final Map<String, bool> _expandedProvidersStep1 = {};
+  final Map<String, bool> _expandedProvidersStep2 = {};
 
   String get _currentPeriodKey {
     final stats = ref.read(dashboardProvider);
@@ -1485,7 +1486,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
             htmlBody: _buildBdcEmailHtml(contactFirstName: contactFirstName, bdcNumber: bdcNumber),
             attachments: [tempFile],
             inlineAttachments: [sigAttachment],
-            bcc: [settings.smtpUser], // Copie conforme à l'expéditeur
+            bcc: const ['fournisseurs@viv-prod.com'], // Copie conforme cachée pour archivage
           );
 
           // Supprimer les fichiers temporaires
@@ -1625,7 +1626,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
             htmlBody: _buildBdcEmailHtml(contactFirstName: contactFirstName, bdcNumber: bdcNumber),
             attachments: [tempFile],
             inlineAttachments: [sigAttachment],
-            bcc: [settings.smtpUser], // Copie conforme à l'expéditeur
+            bcc: const ['fournisseurs@viv-prod.com'], // Copie conforme cachée pour archivage
           );
 
           // Supprimer les fichiers temporaires
@@ -2070,6 +2071,34 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                           TextButton(
                             onPressed: () {
                               setState(() {
+                                for (var group in providerGroups) {
+                                  _expandedProvidersStep1[group.providerId] = true;
+                                }
+                              });
+                            },
+                            child: const Text("Tout déplier", style: TextStyle(color: Colors.black, fontSize: 11, fontWeight: FontWeight.bold)),
+                          ),
+                          const SizedBox(
+                            height: 12,
+                            child: VerticalDivider(width: 16, color: VivColors.gray300),
+                          ),
+                          TextButton(
+                            onPressed: () {
+                              setState(() {
+                                for (var group in providerGroups) {
+                                  _expandedProvidersStep1[group.providerId] = false;
+                                }
+                              });
+                            },
+                            child: const Text("Tout replier", style: TextStyle(color: Colors.black, fontSize: 11, fontWeight: FontWeight.bold)),
+                          ),
+                          const SizedBox(
+                            height: 12,
+                            child: VerticalDivider(width: 24, color: VivColors.gray300),
+                          ),
+                          TextButton(
+                            onPressed: () {
+                              setState(() {
                                 for (var c in filteredList) {
                                   if (c.alertMessage == null) {
                                     c.isSelected = true;
@@ -2156,7 +2185,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                           itemCount: providerGroups.length,
                           itemBuilder: (context, groupIndex) {
                             final group = providerGroups[groupIndex];
-                            final isExpanded = _expandedProviders[group.providerId] ?? true;
+                            final isExpanded = _expandedProvidersStep1[group.providerId] ?? true;
                             
                             final validItems = group.items.where((x) => x.alertMessage == null && !x.isAlreadySent).toList();
                             final bool? checkboxValue = validItems.isEmpty 
@@ -2177,7 +2206,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                                         icon: Icon(isExpanded ? LucideIcons.chevronDown : LucideIcons.chevronRight, size: 18),
                                         onPressed: () {
                                           setState(() {
-                                            _expandedProviders[group.providerId] = !isExpanded;
+                                            _expandedProvidersStep1[group.providerId] = !isExpanded;
                                           });
                                         },
                                         padding: EdgeInsets.zero,
@@ -2478,15 +2507,44 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                 ),
               ],
             ),
-            ShadButton.outline(
-              onPressed: _showRulesModal,
-              child: const Row(
-                children: [
-                  Icon(LucideIcons.settings, size: 14, color: Colors.black),
-                  SizedBox(width: 8),
-                  Text("Règles Spécifiques", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-                ],
-              ),
+            Row(
+              children: [
+                TextButton(
+                  onPressed: () {
+                    setState(() {
+                      for (var group in providerGroups) {
+                        _expandedProvidersStep2[group.providerId] = true;
+                      }
+                    });
+                  },
+                  child: const Text("Tout déplier", style: TextStyle(color: Colors.black, fontSize: 11, fontWeight: FontWeight.bold)),
+                ),
+                const SizedBox(
+                  height: 12,
+                  child: VerticalDivider(width: 16, color: VivColors.gray300),
+                ),
+                TextButton(
+                  onPressed: () {
+                    setState(() {
+                      for (var group in providerGroups) {
+                        _expandedProvidersStep2[group.providerId] = false;
+                      }
+                    });
+                  },
+                  child: const Text("Tout replier", style: TextStyle(color: Colors.black, fontSize: 11, fontWeight: FontWeight.bold)),
+                ),
+                const SizedBox(width: 16),
+                ShadButton.outline(
+                  onPressed: _showRulesModal,
+                  child: const Row(
+                    children: [
+                      Icon(LucideIcons.settings, size: 14, color: Colors.black),
+                      SizedBox(width: 8),
+                      Text("Règles Spécifiques", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -2502,7 +2560,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
               itemCount: providerGroups.length,
               itemBuilder: (context, groupIndex) {
                 final group = providerGroups[groupIndex];
-                final isExpanded = _expandedProviders[group.providerId] ?? true;
+                final isExpanded = _expandedProvidersStep2[group.providerId] ?? true;
 
                 // Calculer les jours ouvrés du mois pour le plafonnement de groupe
                 final m = int.tryParse(_selectedMonth) ?? DateTime.now().month;
@@ -2539,7 +2597,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                             icon: Icon(isExpanded ? LucideIcons.chevronDown : LucideIcons.chevronRight, size: 18),
                             onPressed: () {
                               setState(() {
-                                _expandedProviders[group.providerId] = !isExpanded;
+                                _expandedProvidersStep2[group.providerId] = !isExpanded;
                               });
                             },
                             padding: EdgeInsets.zero,

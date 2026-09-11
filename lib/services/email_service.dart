@@ -5,6 +5,9 @@ import 'package:mailer/smtp_server.dart';
 import '../models/app_settings.dart';
 
 class EmailService {
+  static const String defaultSenderEmail = 'fournisseurs@viv-prod.com';
+  static const String defaultSenderName = 'VIV - Relations Fournisseurs';
+
   /// Envoie un e-mail via le serveur SMTP configuré avec pièces jointes optionnelles
   Future<void> sendEmail({
     required AppSettings settings,
@@ -12,6 +15,8 @@ class EmailService {
     required String subject,
     required String body,
     String? htmlBody,
+    String? fromEmail,
+    String? fromName,
     List<String> bcc = const [],
     List<File> attachments = const [],
     List<Attachment> inlineAttachments = const [],
@@ -36,8 +41,15 @@ class EmailService {
     );
 
     // Construction du message
+    final effectiveFromEmail = (fromEmail != null && fromEmail.isNotEmpty)
+        ? fromEmail
+        : defaultSenderEmail;
+    final effectiveFromName = (fromName != null && fromName.isNotEmpty)
+        ? fromName
+        : defaultSenderName;
+
     final message = Message()
-      ..from = Address(user, 'VIV Relations Fournisseurs')
+      ..from = Address(effectiveFromEmail, effectiveFromName)
       ..recipients.add(to)
       ..subject = subject
       ..text = body;
