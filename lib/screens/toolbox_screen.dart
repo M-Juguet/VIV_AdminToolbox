@@ -12,6 +12,7 @@ import 'tools/create_resource_tool_screen.dart';
 import 'tools/create_company_tool_screen.dart';
 import 'tools/create_contact_tool_screen.dart';
 import 'tools/contracts_management_tool_screen.dart';
+import 'tools/bdc_reconciliation_screen.dart';
 import '../services/bdc_sent_logs_service.dart';
 
 
@@ -323,6 +324,30 @@ class ToolboxScreen extends StatelessWidget {
             title: "Utilitaires & Calculs",
             icon: LucideIcons.calculator,
             tools: [
+              _ToolDefinition(
+                title: "Audit & Réconciliation BDC",
+                description:
+                    "Comparer les réceptions réelles Outlook (.pst) avec la base locale pour réinitialiser les BDC non reçus.",
+                icon: LucideIcons.mailCheck,
+                onPressed: () {
+                  showDialog(
+                    context: context,
+                    barrierDismissible: true,
+                    builder: (context) => Center(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 40),
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 1100, maxHeight: 880),
+                          child: BdcReconciliationScreen(
+                            onClose: () => Navigator.of(context).pop(),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+                status: ToolStatus.newTag,
+              ),
               _ToolDefinition(
                 title: "Jours ouvrés",
                 description:

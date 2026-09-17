@@ -13,6 +13,7 @@ import '../providers/settings_provider.dart';
 import '../providers/dashboard_provider.dart';
 import '../services/bdc_pdf_service.dart';
 import 'tools/bdc_rules_diagnostic_screen.dart';
+import 'tools/bdc_reconciliation_screen.dart';
 import '../services/bdc_sent_logs_service.dart';
 import '../services/boond_cache_service.dart';
 import '../services/boond_service.dart';
@@ -173,6 +174,12 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
   int _maxUnlockedStep = 0; // 0: Détection initiale, 1: Étape 1 déverrouillée, 2: Étape 2 déverrouillée
   bool _isLoadingDetection = false;
   bool _isSendingMails = false;
+  bool _isSendingPaused = false;
+  bool _isSendingCanceled = false;
+  int _cooldownRemaining = 0;
+  static const int _batchSize = 25;
+  static const double _pacingSeconds = 3.5;
+  static const int _cooldownSeconds = 45;
   final Set<String> _loadingItems = {};
 
   // Variables de filtrage et recherche (Phase 1)
@@ -1266,14 +1273,6 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
     _tabController.animateTo(2);
   }
 
-  void _startSendingMails() {
-    setState(() {
-      _isSendingMails = true;
-    });
-
-    _sendMailSequential(0);
-  }
-
   /// Construit le corps HTML du mail envoyé au fournisseur avec stylisation précise
   String _buildBdcEmailHtml({
     required String contactFirstName,
@@ -1393,23 +1392,123 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
         "fournisseurs@viv-prod.com | www.viv-prod.com";
   }
 
-  void _sendMailSequential(int index) async {
-    if (index >= _smtpStatusList.length) {
-      if (!mounted) return;
-      setState(() {
-        _isSendingMails = false;
-      });
-      ShadToaster.of(context).show(
-        const ShadToast(
-          title: Text("Distribution terminée"),
-          description: Text("Les bons de commande conformes ont été expédiés."),
-          backgroundColor: Colors.teal,
-        ),
-      );
-      return;
+  void _startSendingMails() async {
+    setState(() {
+      _isSendingMails = true;
+      _isSendingPaused = false;
+      _isSendingCanceled = false;
+      _cooldownRemaining = 0;
+    });
+
+    int sentInCurrentRun = 0;
+
+    for (int i = 0; i < _smtpStatusList.length; i++) {
+      if (!_isSendingMails || _isSendingCanceled) break;
+
+      final item = _smtpStatusList[i];
+      if (item.status == 'success') continue;
+
+      // Gestion de la pause
+      while (_isSendingPaused && _isSendingMails && !_isSendingCanceled) {
+        await Future.delayed(const Duration(milliseconds: 400));
+        if (!mounted) return;
+      }
+      if (!_isSendingMails || _isSendingCanceled) break;
+
+      // Gestion du lot et de la pause anti-flood OVH (tous les 25 envois effectifs)
+      if (sentInCurrentRun > 0 && sentInCurrentRun % _batchSize == 0) {
+        for (int c = _cooldownSeconds; c > 0; c--) {
+          if (!_isSendingMails || _isSendingCanceled) break;
+          while (_isSendingPaused && _isSendingMails && !_isSendingCanceled) {
+            await Future.delayed(const Duration(milliseconds: 400));
+          }
+          if (mounted) {
+            setState(() {
+              _cooldownRemaining = c;
+            });
+          }
+          await Future.delayed(const Duration(seconds: 1));
+        }
+        if (mounted) {
+          setState(() {
+            _cooldownRemaining = 0;
+          });
+        }
+      }
+
+      if (!_isSendingMails || _isSendingCanceled) break;
+
+      // Exécution de l'envoi unitaire (Génération PDF + SMTP + Sembast)
+      await _processSingleMail(item);
+      sentInCurrentRun++;
+
+      // Temporisation de sécurité (Pacing 3.5s) avant le mail suivant
+      if (i < _smtpStatusList.length - 1 && _isSendingMails && !_isSendingCanceled) {
+        final totalMs = (_pacingSeconds * 1000).round();
+        const stepMs = 100;
+        for (int elapsed = 0; elapsed < totalMs; elapsed += stepMs) {
+          if (!_isSendingMails || _isSendingCanceled || _isSendingPaused) break;
+          await Future.delayed(const Duration(milliseconds: stepMs));
+        }
+      }
     }
 
-    final item = _smtpStatusList[index];
+    if (mounted) {
+      final allSuccess = _smtpStatusList.every((m) => m.status == 'success');
+      final failedCount = _smtpStatusList.where((m) => m.status == 'failed').length;
+
+      setState(() {
+        _isSendingMails = false;
+        _isSendingPaused = false;
+        _isSendingCanceled = false;
+        _cooldownRemaining = 0;
+      });
+
+      if (allSuccess) {
+        ShadToaster.of(context).show(
+          const ShadToast(
+            title: Text("Distribution terminée"),
+            description: Text("Tous les bons de commande conformes ont été expédiés avec succès."),
+            backgroundColor: Colors.teal,
+          ),
+        );
+      } else if (failedCount > 0) {
+        ShadToaster.of(context).show(
+          ShadToast.destructive(
+            title: const Text("Envois incomplets"),
+            description: Text("$failedCount bons de commande n'ont pas pu être envoyés. Vous pouvez les renvoyer."),
+          ),
+        );
+      }
+    }
+  }
+
+  void _pauseSendingMails() {
+    setState(() {
+      _isSendingPaused = true;
+    });
+  }
+
+  void _resumeSendingMails() {
+    setState(() {
+      _isSendingPaused = false;
+    });
+  }
+
+  void _cancelSendingMails() {
+    setState(() {
+      _isSendingCanceled = true;
+      _isSendingMails = false;
+      _isSendingPaused = false;
+      _cooldownRemaining = 0;
+    });
+  }
+
+  void _retryFailedMails() {
+    _startSendingMails();
+  }
+
+  Future<void> _processSingleMail(BdcMailStatus item) async {
     final providerId = item.id;
     final providerPrestas = _step2Calculated.where((x) => x.providerId == providerId).toList();
     final step1Item = _step1Candidates.firstWhere((x) => x.providerId == providerId);
@@ -1419,313 +1518,151 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
       item.status = 'generating';
     });
 
-    Future.delayed(const Duration(milliseconds: 600), () async {
-      if (!mounted) return;
-      
-      Uint8List? pdfBytes;
-      try {
-        final isPortage = _isPortageProvider(providerId);
-        pdfBytes = await BdcPdfService.generateBdcPdf(
-          providerPrestas,
-          _selectedMonth,
-          _selectedYear,
-          holidays: _holidays,
-          isPortage: isPortage,
-        );
-      } catch (e) {
+    await Future.delayed(const Duration(milliseconds: 200));
+    if (!mounted) return;
+
+    Uint8List? pdfBytes;
+    try {
+      final isPortage = _isPortageProvider(providerId);
+      pdfBytes = await BdcPdfService.generateBdcPdf(
+        providerPrestas,
+        _selectedMonth,
+        _selectedYear,
+        holidays: _holidays,
+        isPortage: isPortage,
+      );
+    } catch (e) {
+      if (mounted) {
         setState(() {
           item.status = 'failed';
           item.errorMessage = "Échec de génération PDF : $e";
         });
-        _sendMailSequential(index + 1);
-        return;
       }
+      return;
+    }
 
-      // Étape 2 : Envoi SMTP réel
+    // Étape 2 : Envoi SMTP réel
+    if (mounted) {
       setState(() {
         item.status = 'sending';
       });
-
-      Future.delayed(const Duration(milliseconds: 300), () async {
-        if (!mounted) return;
-        
-        try {
-          final String yearSuffix = _selectedYear.substring(_selectedYear.length - 2);
-          final String bdcNumber = "VIV-PO-CSOC$providerId-$yearSuffix$_selectedMonth";
-
-          final tempDir = await getTemporaryDirectory();
-          final tempFile = File(p.join(tempDir.path, "$bdcNumber.pdf"));
-          await tempFile.writeAsBytes(pdfBytes!);
-
-          final settings = ref.read(settingsProvider);
-          final emailService = ref.read(emailServiceProvider);
-          final service = ref.read(boondServiceProvider);
-          final period = '$_selectedMonth/$_selectedYear';
-          final logsService = BdcSentLogsService();
-          
-          final monthsFrench = {
-            '01': 'Janvier', '02': 'Février', '03': 'Mars', '04': 'Avril',
-            '05': 'Mai', '06': 'Juin', '07': 'Juillet', '08': 'Août',
-            '09': 'Septembre', '10': 'Octobre', '11': 'Novembre', '12': 'Décembre'
-          };
-          final monthLabel = monthsFrench[_selectedMonth] ?? 'Mois';
-          
-          String contactFirstName = "Madame, Monsieur";
-          try {
-            final cList = await service.getCompanyContacts(int.parse(providerId));
-            final match = cList.firstWhere((x) => x['id']?.toString() == step1Item.providerContactId, orElse: () => null);
-            if (match != null) {
-              contactFirstName = match['attributes']?['firstName'] ?? 'Madame, Monsieur';
-            }
-          } catch (_) {}
-
-          final consultantNamesList = providerPrestas.map((x) => x.consultantName).join(', ');
-
-          // Charger l'image de la signature depuis les assets et l'embarquer en inline CID
-          final sigData = await rootBundle.load('assets/images/signature_relation_fournisseurs_viv.png');
-          final sigFile = File(p.join(tempDir.path, "signature_relation_fournisseurs_viv.png"));
-          await sigFile.writeAsBytes(sigData.buffer.asUint8List());
-
-          final sigAttachment = FileAttachment(sigFile)
-            ..cid = '<signature_viv>'
-            ..fileName = 'signature_relation_fournisseurs_viv.png'
-            ..contentType = 'image/png';
-
-          // 1. Envoyer le mail stylisé en HTML avec pièce jointe PDF et signature
-          await emailService.sendEmail(
-            settings: settings,
-            to: item.email,
-            subject: "Votre bon de commande_$monthLabel $_selectedYear",
-            body: _buildBdcEmailPlainText(contactFirstName: contactFirstName, bdcNumber: bdcNumber),
-            htmlBody: _buildBdcEmailHtml(contactFirstName: contactFirstName, bdcNumber: bdcNumber),
-            attachments: [tempFile],
-            inlineAttachments: [sigAttachment],
-            bcc: const ['fournisseurs@viv-prod.com'], // Copie conforme cachée pour archivage
-          );
-
-          // Supprimer les fichiers temporaires
-          try {
-            await tempFile.delete();
-            await sigFile.delete();
-          } catch (_) {}
-
-          // Calculer les totaux effectifs (avec plafonnement éventuel) pour les logs
-          final m = int.tryParse(_selectedMonth) ?? DateTime.now().month;
-          final y = int.tryParse(_selectedYear) ?? DateTime.now().year;
-          final startOfMonth = DateTime(y, m, 1);
-          final endOfMonth = m == 12 ? DateTime(y + 1, 1, 0) : DateTime(y, m + 1, 0);
-          final maxWorkingDays = CalendarService.calculateWorkingDays(
-            start: startOfMonth,
-            end: endOfMonth,
-            holidays: _holidays,
-          );
-          final isPortage = _isPortageProvider(providerId);
-          final rawTotalUo = providerPrestas.fold<double>(0, (sum, p) => sum + p.uoCount);
-          final bool isCapped = !isPortage && (rawTotalUo > maxWorkingDays);
-          final double effectiveUo = isCapped ? maxWorkingDays.toDouble() : rawTotalUo;
-          final double effectiveTotalHt = isCapped
-              ? effectiveUo * providerPrestas.fold<double>(0, (max, p) => p.tjm > max ? p.tjm : max)
-              : providerPrestas.fold<double>(0, (sum, p) => sum + p.totalHt);
-
-          // 2. Sauvegarder dans Sembast + disque physique local
-          await logsService.logSentBdc(
-            providerId: providerId,
-            consultantName: consultantNamesList,
-            clientName: providerPrestas.map((x) => x.clientName).toSet().join(', '),
-            projectName: providerPrestas.map((x) => x.projectName).toSet().join(', '),
-            prestationTitle: providerPrestas.map((x) => x.prestationTitle).toSet().join(', '),
-            period: period,
-            sentToEmail: item.email,
-            bdcNumber: bdcNumber,
-            uoCount: effectiveUo,
-            totalHt: effectiveTotalHt,
-            pdfBytes: pdfBytes,
-          );
-
-          // Mettre à jour immédiatement en mémoire pour que la phase 1 soit à jour
-          final step1Items = _step1Candidates.where((x) => x.providerId == providerId).toList();
-          for (var s1Item in step1Items) {
-            s1Item.isAlreadySent = true;
-            final now = DateTime.now();
-            s1Item.sentDate = "${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year}";
-            s1Item.isSelected = false;
-          }
-
-          setState(() {
-            item.status = 'success';
-          });
-        } catch (e) {
-          setState(() {
-            item.status = 'failed';
-            item.errorMessage = e.toString();
-          });
-        }
-
-        _sendMailSequential(index + 1);
-      });
-    });
-  }
-
-  void _retryFailedMails() async {
-    setState(() {
-      _isSendingMails = true;
-    });
-
-    final logsService = BdcSentLogsService();
-    final period = '$_selectedMonth/$_selectedYear';
-    final settings = ref.read(settingsProvider);
-    final emailService = ref.read(emailServiceProvider);
-    final service = ref.read(boondServiceProvider);
-
-    for (var item in _smtpStatusList) {
-      if (item.status == 'failed') {
-        setState(() {
-          item.status = 'generating';
-        });
-        
-        await Future.delayed(const Duration(milliseconds: 300));
-        
-        final providerId = item.id;
-        final providerPrestas = _step2Calculated.where((x) => x.providerId == providerId).toList();
-        final step1Item = _step1Candidates.firstWhere((x) => x.providerId == providerId);
-        
-        Uint8List? pdfBytes;
-        try {
-          final isPortage = _isPortageProvider(providerId);
-          pdfBytes = await BdcPdfService.generateBdcPdf(
-            providerPrestas,
-            _selectedMonth,
-            _selectedYear,
-            holidays: _holidays,
-            isPortage: isPortage,
-          );
-          
-          setState(() {
-            item.status = 'sending';
-          });
-          
-          final String yearSuffix = _selectedYear.substring(_selectedYear.length - 2);
-          final String bdcNumber = "VIV-PO-CSOC$providerId-$yearSuffix$_selectedMonth";
-
-          final tempDir = await getTemporaryDirectory();
-          final tempFile = File(p.join(tempDir.path, "$bdcNumber.pdf"));
-          await tempFile.writeAsBytes(pdfBytes);
-
-          final monthsFrench = {
-            '01': 'Janvier', '02': 'Février', '03': 'Mars', '04': 'Avril',
-            '05': 'Mai', '06': 'Juin', '07': 'Juillet', '08': 'Août',
-            '09': 'Septembre', '10': 'Octobre', '11': 'Novembre', '12': 'Décembre'
-          };
-          final monthLabel = monthsFrench[_selectedMonth] ?? 'Mois';
-          
-          String contactFirstName = "Madame, Monsieur";
-          try {
-            final cList = await service.getCompanyContacts(int.parse(providerId));
-            final match = cList.firstWhere((x) => x['id']?.toString() == step1Item.providerContactId, orElse: () => null);
-            if (match != null) {
-              contactFirstName = match['attributes']?['firstName'] ?? 'Madame, Monsieur';
-            }
-          } catch (_) {}
-
-          final consultantNamesList = providerPrestas.map((x) => x.consultantName).join(', ');
-
-          // Charger l'image de la signature depuis les assets et l'embarquer en inline CID
-          final sigData = await rootBundle.load('assets/images/signature_relation_fournisseurs_viv.png');
-          final sigFile = File(p.join(tempDir.path, "signature_relation_fournisseurs_viv_$providerId.png"));
-          await sigFile.writeAsBytes(sigData.buffer.asUint8List());
-
-          final sigAttachment = FileAttachment(sigFile)
-            ..cid = '<signature_viv>'
-            ..fileName = 'signature_relation_fournisseurs_viv.png'
-            ..contentType = 'image/png';
-
-          // 1. Envoyer le mail réel stylisé en HTML
-          await emailService.sendEmail(
-            settings: settings,
-            to: item.email,
-            subject: "Votre bon de commande_$monthLabel $_selectedYear",
-            body: _buildBdcEmailPlainText(contactFirstName: contactFirstName, bdcNumber: bdcNumber),
-            htmlBody: _buildBdcEmailHtml(contactFirstName: contactFirstName, bdcNumber: bdcNumber),
-            attachments: [tempFile],
-            inlineAttachments: [sigAttachment],
-            bcc: const ['fournisseurs@viv-prod.com'], // Copie conforme cachée pour archivage
-          );
-
-          // Supprimer les fichiers temporaires
-          try {
-            await tempFile.delete();
-            await sigFile.delete();
-          } catch (_) {}
-
-          // Calculer les totaux effectifs (avec plafonnement éventuel) pour les logs
-          final m = int.tryParse(_selectedMonth) ?? DateTime.now().month;
-          final y = int.tryParse(_selectedYear) ?? DateTime.now().year;
-          final startOfMonth = DateTime(y, m, 1);
-          final endOfMonth = m == 12 ? DateTime(y + 1, 1, 0) : DateTime(y, m + 1, 0);
-          final maxWorkingDays = CalendarService.calculateWorkingDays(
-            start: startOfMonth,
-            end: endOfMonth,
-            holidays: _holidays,
-          );
-          final rawTotalUo = providerPrestas.fold<double>(0, (sum, p) => sum + p.uoCount);
-          final bool isCapped = !isPortage && (rawTotalUo > maxWorkingDays);
-          final double effectiveUo = isCapped ? maxWorkingDays.toDouble() : rawTotalUo;
-          final double effectiveTotalHt = isCapped
-              ? effectiveUo * providerPrestas.fold<double>(0, (max, p) => p.tjm > max ? p.tjm : max)
-              : providerPrestas.fold<double>(0, (sum, p) => sum + p.totalHt);
-
-          // 2. Sauvegarder dans Sembast + disque physique local
-          await logsService.logSentBdc(
-            providerId: providerId,
-            consultantName: consultantNamesList,
-            clientName: providerPrestas.map((x) => x.clientName).toSet().join(', '),
-            projectName: providerPrestas.map((x) => x.projectName).toSet().join(', '),
-            prestationTitle: providerPrestas.map((x) => x.prestationTitle).toSet().join(', '),
-            period: period,
-            sentToEmail: item.email,
-            bdcNumber: bdcNumber,
-            uoCount: effectiveUo,
-            totalHt: effectiveTotalHt,
-            pdfBytes: pdfBytes,
-          );
-
-          // Mettre à jour immédiatement en mémoire pour que la phase 1 soit à jour
-          final step1Items = _step1Candidates.where((x) => x.providerId == providerId).toList();
-          for (var s1Item in step1Items) {
-            s1Item.isAlreadySent = true;
-            final now = DateTime.now();
-            s1Item.sentDate = "${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year}";
-            s1Item.isSelected = false;
-          }
-
-          setState(() {
-            item.status = 'success';
-            item.errorMessage = null;
-          });
-        } catch (e) {
-          setState(() {
-            item.status = 'failed';
-            item.errorMessage = e.toString();
-          });
-        }
-      }
     }
 
-    setState(() {
-      _isSendingMails = false;
-    });
+    try {
+      final String yearSuffix = _selectedYear.substring(_selectedYear.length - 2);
+      final String bdcNumber = "VIV-PO-CSOC$providerId-$yearSuffix$_selectedMonth";
 
-    if (!mounted) return;
+      final tempDir = await getTemporaryDirectory();
+      final tempFile = File(p.join(tempDir.path, "$bdcNumber.pdf"));
+      await tempFile.writeAsBytes(pdfBytes);
 
-    final allSuccess = _smtpStatusList.every((m) => m.status == 'success');
-    if (allSuccess) {
-      ShadToaster.of(context).show(
-        const ShadToast(
-          title: Text("Tout a été envoyé !"),
-          description: Text("Les échecs ont été résolus et distribués."),
-          backgroundColor: Colors.teal,
-        ),
+      final settings = ref.read(settingsProvider);
+      final emailService = ref.read(emailServiceProvider);
+      final service = ref.read(boondServiceProvider);
+      final period = '$_selectedMonth/$_selectedYear';
+      final logsService = BdcSentLogsService();
+
+      final monthsFrench = {
+        '01': 'Janvier', '02': 'Février', '03': 'Mars', '04': 'Avril',
+        '05': 'Mai', '06': 'Juin', '07': 'Juillet', '08': 'Août',
+        '09': 'Septembre', '10': 'Octobre', '11': 'Novembre', '12': 'Décembre'
+      };
+      final monthLabel = monthsFrench[_selectedMonth] ?? 'Mois';
+
+      String contactFirstName = "Madame, Monsieur";
+      try {
+        final cList = await service.getCompanyContacts(int.parse(providerId));
+        final match = cList.firstWhere((x) => x['id']?.toString() == step1Item.providerContactId, orElse: () => null);
+        if (match != null) {
+          contactFirstName = match['attributes']?['firstName'] ?? 'Madame, Monsieur';
+        }
+      } catch (_) {}
+
+      final consultantNamesList = providerPrestas.map((x) => x.consultantName).join(', ');
+
+      // Charger l'image de la signature depuis les assets et l'embarquer en inline CID
+      final sigData = await rootBundle.load('assets/images/signature_relation_fournisseurs_viv.png');
+      final sigFile = File(p.join(tempDir.path, "signature_relation_fournisseurs_viv_$providerId.png"));
+      await sigFile.writeAsBytes(sigData.buffer.asUint8List());
+
+      final sigAttachment = FileAttachment(sigFile)
+        ..cid = '<signature_viv>'
+        ..fileName = 'signature_relation_fournisseurs_viv.png'
+        ..contentType = 'image/png';
+
+      // 1. Envoyer le mail stylisé en HTML avec pièce jointe PDF et signature
+      await emailService.sendEmail(
+        settings: settings,
+        to: item.email,
+        subject: "Votre bon de commande_$monthLabel $_selectedYear",
+        body: _buildBdcEmailPlainText(contactFirstName: contactFirstName, bdcNumber: bdcNumber),
+        htmlBody: _buildBdcEmailHtml(contactFirstName: contactFirstName, bdcNumber: bdcNumber),
+        attachments: [tempFile],
+        inlineAttachments: [sigAttachment],
+        bcc: const ['fournisseurs@viv-prod.com'], // Copie conforme cachée pour archivage
       );
+
+      // Supprimer les fichiers temporaires
+      try {
+        await tempFile.delete();
+        await sigFile.delete();
+      } catch (_) {}
+
+      // Calculer les totaux effectifs (avec plafonnement éventuel) pour les logs
+      final m = int.tryParse(_selectedMonth) ?? DateTime.now().month;
+      final y = int.tryParse(_selectedYear) ?? DateTime.now().year;
+      final startOfMonth = DateTime(y, m, 1);
+      final endOfMonth = m == 12 ? DateTime(y + 1, 1, 0) : DateTime(y, m + 1, 0);
+      final maxWorkingDays = CalendarService.calculateWorkingDays(
+        start: startOfMonth,
+        end: endOfMonth,
+        holidays: _holidays,
+      );
+      final isPortage = _isPortageProvider(providerId);
+      final rawTotalUo = providerPrestas.fold<double>(0, (sum, p) => sum + p.uoCount);
+      final bool isCapped = !isPortage && (rawTotalUo > maxWorkingDays);
+      final double effectiveUo = isCapped ? maxWorkingDays.toDouble() : rawTotalUo;
+      final double effectiveTotalHt = isCapped
+          ? effectiveUo * providerPrestas.fold<double>(0, (max, p) => p.tjm > max ? p.tjm : max)
+          : providerPrestas.fold<double>(0, (sum, p) => sum + p.totalHt);
+
+      // 2. Sauvegarder dans Sembast + disque physique local
+      await logsService.logSentBdc(
+        providerId: providerId,
+        consultantName: consultantNamesList,
+        clientName: providerPrestas.map((x) => x.clientName).toSet().join(', '),
+        projectName: providerPrestas.map((x) => x.projectName).toSet().join(', '),
+        prestationTitle: providerPrestas.map((x) => x.prestationTitle).toSet().join(', '),
+        period: period,
+        sentToEmail: item.email,
+        bdcNumber: bdcNumber,
+        uoCount: effectiveUo,
+        totalHt: effectiveTotalHt,
+        pdfBytes: pdfBytes,
+      );
+
+      // Mettre à jour immédiatement en mémoire pour que la phase 1 soit à jour
+      final step1Items = _step1Candidates.where((x) => x.providerId == providerId).toList();
+      for (var s1Item in step1Items) {
+        s1Item.isAlreadySent = true;
+        final now = DateTime.now();
+        s1Item.sentDate = "${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year}";
+        s1Item.isSelected = false;
+      }
+
+      if (mounted) {
+        setState(() {
+          item.status = 'success';
+          item.errorMessage = null;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          item.status = 'failed';
+          item.errorMessage = e.toString();
+        });
+      }
     }
   }
 
@@ -1970,9 +1907,37 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
             ],
           ),
           const Spacer(),
-          if (_tabController.index == 0)
-            Row(
-              children: [
+          Row(
+            children: [
+              ShadButton.outline(
+                onPressed: () async {
+                  await showDialog(
+                    context: context,
+                    barrierDismissible: true,
+                    builder: (ctx) => Center(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 40),
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 1100, maxHeight: 880),
+                          child: BdcReconciliationScreen(
+                            onClose: () => Navigator.of(ctx).pop(),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                  await _refreshStep1SentStatuses();
+                },
+                child: const Row(
+                  children: [
+                    Icon(LucideIcons.mailCheck, size: 14, color: Colors.teal),
+                    SizedBox(width: 8),
+                    Text("Audit & Réconciliation PST", style: TextStyle(color: Colors.teal, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              if (_tabController.index == 0) ...[
                 if (_isCurrentPeriodDetected) ...[
                   ShadButton.outline(
                     onPressed: _isLoadingDetection 
@@ -2003,10 +1968,39 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                         : const Text("Détecter les prestations", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                   ),
               ],
-            ),
+            ],
+          ),
         ],
       ),
     );
+  }
+
+  Future<void> _refreshStep1SentStatuses() async {
+    if (!_isCurrentPeriodDetected) return;
+    final period = '$_selectedMonth/$_selectedYear';
+    final logsService = BdcSentLogsService();
+    
+    for (var candidate in _step1Candidates) {
+      final log = await logsService.getSentLog(candidate.providerId, period);
+      if (log != null) {
+        candidate.isAlreadySent = true;
+        final sentAtStr = log['sentAt'] as String?;
+        if (sentAtStr != null) {
+          final sentAt = DateTime.tryParse(sentAtStr);
+          if (sentAt != null) {
+            candidate.sentDate = "${sentAt.day.toString().padLeft(2, '0')}/${sentAt.month.toString().padLeft(2, '0')}/${sentAt.year}";
+          }
+        }
+        candidate.isSelected = false;
+      } else {
+        candidate.isAlreadySent = false;
+        candidate.sentDate = null;
+        candidate.isSelected = true; // Redeclenche la sélection par défaut pour réémission
+      }
+    }
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   Widget _buildDetectionWelcomeWidget(dynamic stats) {
@@ -2825,16 +2819,105 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
     return Column(
       children: [
         Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Icon(LucideIcons.send, size: 18, color: VivColors.gray500),
-            const SizedBox(width: 8),
-            Text(
-              "DISTRIBUTION ET STATUT DES ENVOIS",
-              style: VivTypography.small.copyWith(fontWeight: FontWeight.bold, color: VivColors.gray500),
+            Row(
+              children: [
+                const Icon(LucideIcons.send, size: 18, color: VivColors.gray500),
+                const SizedBox(width: 8),
+                Text(
+                  "DISTRIBUTION ET STATUT DES ENVOIS",
+                  style: VivTypography.small.copyWith(fontWeight: FontWeight.bold, color: VivColors.gray500),
+                ),
+              ],
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.teal.shade50,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: Colors.teal.shade200),
+              ),
+              child: Row(
+                children: [
+                  Icon(LucideIcons.shieldCheck, size: 14, color: Colors.teal.shade700),
+                  const SizedBox(width: 6),
+                  Text(
+                    "Sécurité active : 3.5s / mail • Lots de 25",
+                    style: TextStyle(color: Colors.teal.shade800, fontSize: 11, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
         const SizedBox(height: 12),
+
+        // Bannière de pause de sécurité anti-flood OVH
+        if (_cooldownRemaining > 0)
+          Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: Colors.amber.shade50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.amber.shade300),
+            ),
+            child: Row(
+              children: [
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.amber),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "Pause de sécurité anti-flood OVH (Lot de 25 traité)",
+                        style: TextStyle(fontWeight: FontWeight.bold, color: Colors.amber.shade900, fontSize: 13),
+                      ),
+                      Text(
+                        "Pour préserver la délivrabilité et respecter les quotas du serveur, reprise automatique dans $_cooldownRemaining s...",
+                        style: TextStyle(color: Colors.amber.shade900, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+                Text(
+                  "$_cooldownRemaining s",
+                  style: TextStyle(fontWeight: FontWeight.bold, color: Colors.amber.shade900, fontSize: 18),
+                ),
+              ],
+            ),
+          ),
+
+        // Bannière de pause manuelle
+        if (_isSendingPaused && _isSendingMails)
+          Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.orange.shade50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.orange.shade300),
+            ),
+            child: Row(
+              children: [
+                Icon(LucideIcons.circlePause, color: Colors.orange.shade800, size: 18),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    "Envoi suspendu. Cliquez sur « Reprendre » pour continuer la distribution.",
+                    style: TextStyle(color: Colors.orange.shade900, fontWeight: FontWeight.w600, fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
         Expanded(
           child: Container(
             decoration: BoxDecoration(
@@ -2894,68 +2977,106 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                 onPressed: () => setState(() => _tabController.animateTo(1)),
               )
             else
-              const SizedBox.shrink(),
+              Row(
+                children: [
+                  const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.teal),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    "Progression : $successMailsCount / ${_smtpStatusList.length} envoyés",
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.teal),
+                  ),
+                ],
+              ),
             Row(
               children: [
-                if (failedMailsCount > 0 && !_isSendingMails) ...[
-                  ShadButton(
-                    backgroundColor: Colors.red.shade600,
-                    onPressed: _retryFailedMails,
-                    child: Row(
-                      children: [
-                        const Icon(LucideIcons.refreshCw, size: 14, color: Colors.white),
-                        const SizedBox(width: 8),
-                        Text("Renvoyer uniquement les échecs ($failedMailsCount)", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                      ],
+                // Contrôles pendant l'envoi
+                if (_isSendingMails) ...[
+                  if (_isSendingPaused)
+                    ShadButton(
+                      backgroundColor: Colors.teal,
+                      onPressed: _resumeSendingMails,
+                      child: const Row(
+                        children: [
+                          Icon(LucideIcons.play, size: 14, color: Colors.white),
+                          SizedBox(width: 6),
+                          Text("Reprendre l'envoi", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                    )
+                  else
+                    ShadButton(
+                      backgroundColor: Colors.orange.shade700,
+                      onPressed: _pauseSendingMails,
+                      child: const Row(
+                        children: [
+                          Icon(LucideIcons.pause, size: 14, color: Colors.white),
+                          SizedBox(width: 6),
+                          Text("Mettre en pause", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                ],
-                 if (successMailsCount == _smtpStatusList.length && !_isSendingMails)
-                  ShadButton(
-                    backgroundColor: Colors.black,
-                    onPressed: () async {
-                      // Réinitialiser la liste
-                      _resetStep1Data();
-                      
-                      // Charger de manière asynchrone les logs d'envoi de la base
-                      final period = '$_selectedMonth/$_selectedYear';
-                      final logsService = BdcSentLogsService();
-                      
-                      for (var candidate in _step1Candidates) {
-                        final log = await logsService.getSentLog(candidate.providerId, period);
-                        if (log != null) {
-                          candidate.isAlreadySent = true;
-                          final sentAtStr = log['sentAt'] as String?;
-                          if (sentAtStr != null) {
-                            final sentAt = DateTime.parse(sentAtStr);
-                            candidate.sentDate = "${sentAt.day.toString().padLeft(2, '0')}/${sentAt.month.toString().padLeft(2, '0')}/${sentAt.year}";
-                          }
-                          candidate.isSelected = false;
-                        }
-                      }
-                      
-                      if (mounted) {
-                        setState(() {
-                          _maxUnlockedStep = 0;
-                          _tabController.animateTo(0);
-                        });
-                      }
-                    },
-                    child: const Text("Terminer la session", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                  )
-                else if (!_isSendingMails)
-                  ShadButton(
-                    backgroundColor: Colors.teal,
-                    onPressed: _startSendingMails,
+                  const SizedBox(width: 8),
+                  ShadButton.outline(
+                    onPressed: _cancelSendingMails,
                     child: const Row(
                       children: [
-                        Icon(LucideIcons.send, size: 16, color: Colors.white),
-                        SizedBox(width: 8),
-                        Text("Lancer l'envoi SMTP global", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        Icon(LucideIcons.square, size: 14, color: Colors.red),
+                        SizedBox(width: 6),
+                        Text("Arrêter", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
                       ],
                     ),
                   ),
+                ] else ...[
+                  if (failedMailsCount > 0) ...[
+                    ShadButton(
+                      backgroundColor: Colors.red.shade600,
+                      onPressed: _retryFailedMails,
+                      child: Row(
+                        children: [
+                          const Icon(LucideIcons.refreshCw, size: 14, color: Colors.white),
+                          SizedBox(width: 8),
+                          Text("Renvoyer uniquement les échecs ($failedMailsCount)", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                  ],
+                  if (successMailsCount == _smtpStatusList.length)
+                    ShadButton(
+                      backgroundColor: Colors.black,
+                      onPressed: () async {
+                        // Réinitialiser la liste
+                        _resetStep1Data();
+                        
+                        // Charger de manière asynchrone les logs d'envoi de la base
+                        await _refreshStep1SentStatuses();
+                        
+                        if (mounted) {
+                          setState(() {
+                            _maxUnlockedStep = 0;
+                            _tabController.animateTo(0);
+                          });
+                        }
+                      },
+                      child: const Text("Terminer la session", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                    )
+                  else
+                    ShadButton(
+                      backgroundColor: Colors.teal,
+                      onPressed: _startSendingMails,
+                      child: const Row(
+                        children: [
+                          Icon(LucideIcons.send, size: 16, color: Colors.white),
+                          SizedBox(width: 8),
+                          Text("Lancer l'envoi SMTP sécurisé", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                    ),
+                ],
               ],
             ),
           ],
