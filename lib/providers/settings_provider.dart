@@ -22,21 +22,27 @@ class SettingsNotifier extends Notifier<AppSettings> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final settingsJson = prefs.getString(_settingsKey);
-      
+
       AppSettings current = AppSettings();
+      var legacySecretsInPrefs = false;
       if (settingsJson != null) {
         current = AppSettings.fromJson(settingsJson);
+        legacySecretsInPrefs = AppSettings.containsSecrets(settingsJson);
       }
-      
+
       final boondPass = await _storage.read(key: 'boond_pass');
       final smtpPass = await _storage.read(key: 'smtp_pass');
-      
+
       current = current.copyWith(
-        boondPassword: boondPass ?? '',
-        smtpPassword: smtpPass ?? '',
+        boondPassword: AppSettings.resolveSecret(secure: boondPass, legacy: current.boondPassword),
+        smtpPassword: AppSettings.resolveSecret(secure: smtpPass, legacy: current.smtpPassword),
       );
 
       state = current;
+
+      if (legacySecretsInPrefs) {
+        await _migrateLegacySecrets(prefs, current, boondPass: boondPass, smtpPass: smtpPass);
+      }
 
       if (state.isFullScreen) {
         await windowManager.setFullScreen(true);
@@ -46,15 +52,38 @@ class SettingsNotifier extends Notifier<AppSettings> {
     }
   }
 
+  /// Migration v0.1.13 : les versions précédentes écrivaient aussi les mots de passe en clair dans les préférences.
+  /// On s'assure d'abord qu'ils sont dans le stockage sécurisé, puis on réécrit les préférences sans eux.
+  /// En cas d'échec d'écriture sécurisée, les préférences ne sont pas modifiées : aucun identifiant n'est perdu.
+  Future<void> _migrateLegacySecrets(
+    SharedPreferences prefs,
+    AppSettings current, {
+    required String? boondPass,
+    required String? smtpPass,
+  }) async {
+    try {
+      if ((boondPass ?? '').isEmpty && current.boondPassword.isNotEmpty) {
+        await _storage.write(key: 'boond_pass', value: current.boondPassword);
+      }
+      if ((smtpPass ?? '').isEmpty && current.smtpPassword.isNotEmpty) {
+        await _storage.write(key: 'smtp_pass', value: current.smtpPassword);
+      }
+      await prefs.setString(_settingsKey, current.toJson());
+    } catch (_) {
+      // Stockage sécurisé indisponible : on garde l'ancien format plutôt que de perdre les identifiants.
+    }
+  }
+
   Future<void> updateSettings(AppSettings newSettings) async {
     state = newSettings;
-    
+
     final prefs = await SharedPreferences.getInstance();
+    // toJson() n'inclut pas les mots de passe : ils ne sont écrits que dans le stockage sécurisé.
     await prefs.setString(_settingsKey, state.toJson());
-    
+
     await _storage.write(key: 'boond_pass', value: state.boondPassword);
     await _storage.write(key: 'smtp_pass', value: state.smtpPassword);
-    
+
     await windowManager.setFullScreen(state.isFullScreen);
   }
 
@@ -66,7 +95,7 @@ class SettingsNotifier extends Notifier<AppSettings> {
   Future<void> logout() async {
     await _storage.delete(key: 'boond_pass');
     await _storage.delete(key: 'smtp_pass');
-    
+
     state = state.copyWith(
       boondUrl: 'https://ui.boondmanager.com/api',
       boondUser: '',
@@ -77,7 +106,7 @@ class SettingsNotifier extends Notifier<AppSettings> {
       smtpUser: '',
       smtpPassword: '',
     );
-    
+
     await updateSettings(state);
   }
 }

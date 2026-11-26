@@ -9,6 +9,7 @@ import 'package:mailer/mailer.dart' show FileAttachment;
 import '../design_system/viv_colors.dart';
 import '../design_system/viv_spacing.dart';
 import '../design_system/viv_typography.dart';
+import '../models/app_settings.dart';
 import '../providers/settings_provider.dart';
 import '../providers/dashboard_provider.dart';
 import '../services/bdc_pdf_service.dart';
@@ -20,6 +21,8 @@ import '../services/boond_service.dart';
 import '../services/calendar_service.dart';
 import '../services/email_service.dart';
 import '../services/bdc_rules_service.dart';
+import '../services/send_rate_limiter.dart';
+import '../utils/name_sort.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'package:url_launcher/url_launcher.dart';
@@ -180,12 +183,22 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
   static const int _batchSize = 25;
   static const double _pacingSeconds = 3.5;
   static const int _cooldownSeconds = 45;
+
+  // Plafond horaire : la boîte OVH perd sans erreur les e-mails au-delà d'environ 100 par heure (constat du 25/11/2026).
+  // La valeur vient des paramètres (70 par défaut) et est relue au lancement de chaque envoi.
+  final SendRateLimiter _rateLimiter = SendRateLimiter(limit: AppSettings.defaultBdcHourlyLimit);
+  bool _rateLimiterSeeded = false;
+  DateTime? _hourlyResumeAt;
   final Set<String> _loadingItems = {};
 
   // Variables de filtrage et recherche (Phase 1)
   String _searchQuery = "";
   String? _filterClient;
   String? _filterProject;
+
+  // Tri des fournisseurs (étapes 1 et 2)
+  BdcSortField _sortField = BdcSortField.provider;
+  bool _sortAscending = true;
 
   // Mémorisation de détection par période et agence
   final Map<String, bool> _periodDetectionStatus = {};
@@ -1398,7 +1411,23 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
       _isSendingPaused = false;
       _isSendingCanceled = false;
       _cooldownRemaining = 0;
+      _hourlyResumeAt = null;
     });
+
+    _rateLimiter.limit = ref.read(settingsProvider).bdcHourlyLimit;
+
+    // Compter les envois de la dernière heure déjà enregistrés sur ce poste, même faits avant l'ouverture de l'app.
+    // Une seule fois par écran : les envois suivants sont comptés au fil de l'eau (sans doublon lors d'une reprise).
+    if (!_rateLimiterSeeded) {
+      _rateLimiterSeeded = true;
+      try {
+        final recent = (await BdcSentLogsService().getAllSentLogs())
+            .map((l) => DateTime.tryParse(l['sentAt']?.toString() ?? ''))
+            .whereType<DateTime>()
+            .where((t) => DateTime.now().difference(t) < const Duration(hours: 1));
+        _rateLimiter.seed(recent);
+      } catch (_) {}
+    }
 
     int sentInCurrentRun = 0;
 
@@ -1409,6 +1438,30 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
       if (item.status == 'success') continue;
 
       // Gestion de la pause
+      while (_isSendingPaused && _isSendingMails && !_isSendingCanceled) {
+        await Future.delayed(const Duration(milliseconds: 400));
+        if (!mounted) return;
+      }
+      if (!_isSendingMails || _isSendingCanceled) break;
+
+      // Plafond horaire : attendre que la fenêtre glissante d'une heure se libère, puis reprendre seul
+      var hourlyWait = _rateLimiter.waitBeforeNext(DateTime.now());
+      while (hourlyWait > Duration.zero && _isSendingMails && !_isSendingCanceled) {
+        if (mounted) {
+          setState(() {
+            _hourlyResumeAt = DateTime.now().add(hourlyWait);
+          });
+        }
+        await Future.delayed(const Duration(seconds: 1));
+        if (!mounted) return;
+        hourlyWait = _rateLimiter.waitBeforeNext(DateTime.now());
+      }
+      if (_hourlyResumeAt != null && mounted) {
+        setState(() {
+          _hourlyResumeAt = null;
+        });
+      }
+      // Une pause demandée pendant l'attente horaire reste prioritaire
       while (_isSendingPaused && _isSendingMails && !_isSendingCanceled) {
         await Future.delayed(const Duration(milliseconds: 400));
         if (!mounted) return;
@@ -1439,6 +1492,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
       if (!_isSendingMails || _isSendingCanceled) break;
 
       // Exécution de l'envoi unitaire (Génération PDF + SMTP + Sembast)
+      _rateLimiter.record(DateTime.now());
       await _processSingleMail(item);
       sentInCurrentRun++;
 
@@ -1462,6 +1516,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
         _isSendingPaused = false;
         _isSendingCanceled = false;
         _cooldownRemaining = 0;
+        _hourlyResumeAt = null;
       });
 
       if (allSuccess) {
@@ -1501,6 +1556,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
       _isSendingMails = false;
       _isSendingPaused = false;
       _cooldownRemaining = 0;
+      _hourlyResumeAt = null;
     });
   }
 
@@ -2055,8 +2111,23 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
     
     final providerGroups = groupsMap.entries.map((e) {
       final providerName = e.value.first.providerName;
-      return _ProviderGroup(providerId: e.key, providerName: providerName, items: e.value);
-    }).toList()..sort((a, b) => a.providerName.toLowerCase().compareTo(b.providerName.toLowerCase()));
+      final items = [...e.value]
+        ..sort((a, b) => compareNames(a.consultantName, b.consultantName, ascending: _sortAscending));
+      return _ProviderGroup(providerId: e.key, providerName: providerName, items: items);
+    }).toList()
+      ..sort((a, b) => compareNames(
+            groupSortName(
+                field: _sortField,
+                providerName: a.providerName,
+                consultantNames: a.items.map((x) => x.consultantName),
+                ascending: _sortAscending),
+            groupSortName(
+                field: _sortField,
+                providerName: b.providerName,
+                consultantNames: b.items.map((x) => x.consultantName),
+                ascending: _sortAscending),
+            ascending: _sortAscending,
+          ));
 
     final selectedCount = filteredList.where((c) => c.isSelected).length;
 
@@ -2183,6 +2254,38 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                               onChanged: (val) => setState(() => _filterProject = (val == null || val.isEmpty) ? null : val),
                             ),
                           ),
+                          const SizedBox(width: 12),
+                          SizedBox(
+                            width: 200,
+                            child: ShadSelect<BdcSortField>(
+                              initialValue: _sortField,
+                              options: const [
+                                ShadOption(value: BdcSortField.provider, child: Text("Trier par fournisseur")),
+                                ShadOption(value: BdcSortField.consultant, child: Text("Trier par consultant")),
+                              ],
+                              selectedOptionBuilder: (context, value) => Text(
+                                value == BdcSortField.consultant ? "Trier par consultant" : "Trier par fournisseur",
+                              ),
+                              onChanged: (val) => setState(() => _sortField = val ?? BdcSortField.provider),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Tooltip(
+                            message: _sortAscending
+                                ? "Ordre alphabétique A → Z (cliquer pour Z → A)"
+                                : "Ordre alphabétique inverse Z → A (cliquer pour A → Z)",
+                            child: ShadButton.outline(
+                              onPressed: () => setState(() => _sortAscending = !_sortAscending),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(_sortAscending ? LucideIcons.arrowDownAZ : LucideIcons.arrowDownZA, size: 16),
+                                  const SizedBox(width: 6),
+                                  Text(_sortAscending ? "A → Z" : "Z → A"),
+                                ],
+                              ),
+                            ),
+                          ),
                         ],
                       ),
                     ],
@@ -2237,9 +2340,11 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                                           value: checkboxValue,
                                           tristate: true,
                                           activeColor: Colors.black,
-                                          onChanged: (val) {
+                                          onChanged: (_) {
+                                            // La case à trois états propose « partiel » après « coché » : on ignore la
+                                            // valeur proposée. Tout coché → tout décocher ; sinon → tout cocher.
                                             setState(() {
-                                              final targetVal = val ?? true;
+                                              final targetVal = providerCheckboxTarget(checkboxValue);
                                               for (var item in validItems) {
                                                 item.isSelected = targetVal;
                                               }
@@ -2503,10 +2608,26 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
       groupsMap.putIfAbsent(item.providerId, () => []).add(item);
     }
     
+    // Même ordre qu'à l'étape 1 (critère et sens choisis par l'utilisateur)
     final providerGroups = groupsMap.entries.map((e) {
       final providerName = e.value.first.providerName;
-      return _ProviderGroupStep2(providerId: e.key, providerName: providerName, items: e.value);
-    }).toList()..sort((a, b) => a.providerName.toLowerCase().compareTo(b.providerName.toLowerCase()));
+      final items = [...e.value]
+        ..sort((a, b) => compareNames(a.consultantName, b.consultantName, ascending: _sortAscending));
+      return _ProviderGroupStep2(providerId: e.key, providerName: providerName, items: items);
+    }).toList()
+      ..sort((a, b) => compareNames(
+            groupSortName(
+                field: _sortField,
+                providerName: a.providerName,
+                consultantNames: a.items.map((x) => x.consultantName),
+                ascending: _sortAscending),
+            groupSortName(
+                field: _sortField,
+                providerName: b.providerName,
+                consultantNames: b.items.map((x) => x.consultantName),
+                ascending: _sortAscending),
+            ascending: _sortAscending,
+          ));
 
     return Column(
       children: [
@@ -2843,7 +2964,7 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
                   Icon(LucideIcons.shieldCheck, size: 14, color: Colors.teal.shade700),
                   const SizedBox(width: 6),
                   Text(
-                    "Sécurité active : 3.5s / mail • Lots de 25",
+                    "Sécurité active : 3.5s / mail • Lots de 25 • ${ref.watch(settingsProvider).bdcHourlyLimit} max. par heure",
                     style: TextStyle(color: Colors.teal.shade800, fontSize: 11, fontWeight: FontWeight.bold),
                   ),
                 ],
@@ -2852,6 +2973,50 @@ class _BdcScreenState extends ConsumerState<BdcScreen> with SingleTickerProvider
           ],
         ),
         const SizedBox(height: 12),
+
+        // Bannière du plafond horaire (attente longue, reprise automatique)
+        if (_hourlyResumeAt != null && _isSendingMails)
+          Builder(builder: (context) {
+            final resumeAt = _hourlyResumeAt!;
+            final minutesLeft = resumeAt.difference(DateTime.now()).inMinutes + 1;
+            final hh = resumeAt.hour.toString().padLeft(2, '0');
+            final mm = resumeAt.minute.toString().padLeft(2, '0');
+            return Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.blue.shade300),
+              ),
+              child: Row(
+                children: [
+                  Icon(LucideIcons.hourglass, color: Colors.blue.shade800, size: 20),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          "Plafond horaire atteint : ${_rateLimiter.limit} envois en moins d'une heure",
+                          style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue.shade900, fontSize: 13),
+                        ),
+                        Text(
+                          "Au-delà d'environ 100 e-mails par heure, la boîte d'envoi perd les messages sans erreur. "
+                          "Reprise automatique à $hh:$mm. Laissez l'application ouverte et le poste allumé.",
+                          style: TextStyle(color: Colors.blue.shade900, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Text(
+                    "$minutesLeft min",
+                    style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue.shade900, fontSize: 18),
+                  ),
+                ],
+              ),
+            );
+          }),
 
         // Bannière de pause de sécurité anti-flood OVH
         if (_cooldownRemaining > 0)

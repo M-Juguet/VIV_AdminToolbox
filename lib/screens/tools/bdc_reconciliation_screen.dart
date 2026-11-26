@@ -119,7 +119,8 @@ class _BdcReconciliationScreenState extends ConsumerState<BdcReconciliationScree
           ShadToast(
             title: const Text('Analyse terminée'),
             description: Text(
-              '${report.confirmedCount} confirmés / ${report.missingCount} non reçus sur ${report.totalInDatabase} BDC.',
+              '${report.confirmedCount} confirmés, ${report.missingCount} non reçus, '
+              '${report.unverifiableCount} non vérifiables sur ${report.totalInDatabase} BDC.',
             ),
           ),
         );
@@ -141,7 +142,7 @@ class _BdcReconciliationScreenState extends ConsumerState<BdcReconciliationScree
   }
 
   Future<void> _confirmAndCleanDatabase() async {
-    if (_report == null || _report!.missingCount == 0) return;
+    if (_report == null || !_report!.canReset) return;
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -149,9 +150,14 @@ class _BdcReconciliationScreenState extends ConsumerState<BdcReconciliationScree
         title: const Text('Confirmer la réinitialisation ciblée'),
         content: Text(
           'Cette action va supprimer de la base locale uniquement les ${_report!.missingCount} enregistrements '
-          'non confirmés pour la période ${_report!.period}.\n\n'
-          'Les ${_report!.confirmedCount} BDC confirmés reçus resteront intacts.\n\n'
+          'dont la copie est absente du PST pour la période ${_report!.period}.\n\n'
+          'Les ${_report!.confirmedCount} BDC confirmés'
+          '${_report!.unverifiableCount > 0 ? ' et les ${_report!.unverifiableCount} BDC non vérifiables' : ''} '
+          'resteront intacts.\n\n'
           'Les ${_report!.missingCount} prestataires redeviendront cochés et prêts à être envoyés dans l\'étape 1 de l\'écran BDC.\n\n'
+          'Rappel : la boîte OVH accepte environ 100 BDC par heure. Au-delà, les envois sont perdus sans message '
+          'd\'erreur. L\'envoi se met automatiquement en pause au plafond horaire défini dans les paramètres '
+          '(70 par défaut), puis reprend seul : laissez l\'application ouverte jusqu\'à la fin.\n\n'
           'Voulez-vous continuer ?',
         ),
         actions: [
@@ -180,8 +186,9 @@ class _BdcReconciliationScreenState extends ConsumerState<BdcReconciliationScree
         missingProviderIds: _report!.missingProviderIds,
       );
 
-      // Re-lancer la réconciliation pour mettre à jour l'affichage
-      final newReport = await service.reconcileWithDatabase(
+      // Recalculer le rapport avec la base mise à jour, sans relire le PST
+      final newReport = await service.reconcileWithScan(
+        scan: _report!.scan,
         pstPath: _report!.pstPath,
         period: _report!.period,
       );
@@ -511,8 +518,9 @@ class _BdcReconciliationScreenState extends ConsumerState<BdcReconciliationScree
     final query = _searchController.text.trim().toLowerCase();
 
     final filteredEntries = report.entries.where((e) {
-      if (_filterTab == 'confirmed' && !e.isConfirmedInPst) return false;
-      if (_filterTab == 'missing' && e.isConfirmedInPst) return false;
+      if (_filterTab == 'confirmed' && e.status != ReconciliationStatus.confirmed) return false;
+      if (_filterTab == 'missing' && e.status != ReconciliationStatus.missing) return false;
+      if (_filterTab == 'unverifiable' && e.status != ReconciliationStatus.unverifiable) return false;
 
       if (query.isNotEmpty) {
         final provId = e.providerId.toLowerCase();
@@ -550,7 +558,7 @@ class _BdcReconciliationScreenState extends ConsumerState<BdcReconciliationScree
               child: _buildMetricCard(
                 title: "Confirmés dans Outlook",
                 value: "${report.confirmedCount}",
-                subtitle: "Reçus avec succès dans la boîte",
+                subtitle: "Copie reçue dans la boîte",
                 icon: LucideIcons.circleCheck,
                 color: Colors.teal.shade700,
                 bgColor: Colors.teal.shade50,
@@ -567,12 +575,56 @@ class _BdcReconciliationScreenState extends ConsumerState<BdcReconciliationScree
                 bgColor: report.missingCount > 0 ? Colors.red.shade50 : Colors.teal.shade50,
               ),
             ),
+            const SizedBox(width: VivSpacing.space4),
+            Expanded(
+              child: _buildMetricCard(
+                title: "Non vérifiables",
+                value: "${report.unverifiableCount}",
+                subtitle: "Hors dates du PST ou autre adresse",
+                icon: LucideIcons.circleQuestionMark,
+                color: report.unverifiableCount > 0 ? Colors.amber.shade800 : VivColors.gray500,
+                bgColor: report.unverifiableCount > 0 ? Colors.amber.shade50 : VivColors.gray100,
+              ),
+            ),
           ],
         ),
+        const SizedBox(height: VivSpacing.space4),
+
+        _buildScanSummary(report),
         const SizedBox(height: VivSpacing.space5),
 
         // Barre d'actions & nettoyage
-        if (report.missingCount > 0)
+        if (report.resetBlockedReason != null)
+          Container(
+            padding: const EdgeInsets.all(VivSpacing.space4),
+            decoration: BoxDecoration(
+              color: Colors.red.shade50,
+              borderRadius: BorderRadius.circular(VivSpacing.radiusSm),
+              border: Border.all(color: Colors.red.shade300),
+            ),
+            child: Row(
+              children: [
+                Icon(LucideIcons.shieldAlert, color: Colors.red.shade800),
+                const SizedBox(width: VivSpacing.space4),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "Réinitialisation bloquée par sécurité",
+                        style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red.shade900, fontSize: 13),
+                      ),
+                      Text(
+                        report.resetBlockedReason!,
+                        style: TextStyle(color: Colors.red.shade900, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          )
+        else if (report.missingCount > 0)
           Container(
             padding: const EdgeInsets.all(VivSpacing.space4),
             decoration: BoxDecoration(
@@ -597,7 +649,8 @@ class _BdcReconciliationScreenState extends ConsumerState<BdcReconciliationScree
                         ),
                       ),
                       Text(
-                        "Ces ${report.missingCount} prestataires sont enregistrés comme envoyés dans la base, mais ne sont jamais arrivés dans la boîte mail.",
+                        "Ces ${report.missingCount} prestataires sont enregistrés comme envoyés dans la base, mais aucune copie "
+                        "de leur BDC du mois n'est arrivée dans la boîte, alors que le PST couvre leur date d'envoi.",
                         style: TextStyle(
                           color: Colors.amber.shade900,
                           fontSize: 12,
@@ -641,7 +694,10 @@ class _BdcReconciliationScreenState extends ConsumerState<BdcReconciliationScree
                 const SizedBox(width: VivSpacing.space4),
                 Expanded(
                   child: Text(
-                    "Parfait ! Tous les ${report.totalInDatabase} BDC de la base sont confirmés reçus dans Outlook.",
+                    report.unverifiableCount > 0
+                        ? "Aucun BDC manquant parmi ceux que le PST permet de vérifier. "
+                            "${report.unverifiableCount} BDC restent non vérifiables : exportez un PST couvrant leur date d'envoi."
+                        : "Parfait ! Tous les ${report.totalInDatabase} BDC de la base sont confirmés reçus dans Outlook.",
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
                       color: Colors.teal.shade900,
@@ -670,6 +726,8 @@ class _BdcReconciliationScreenState extends ConsumerState<BdcReconciliationScree
                         _buildFilterButton('confirmed', 'Confirmés (${report.confirmedCount})'),
                         const SizedBox(width: VivSpacing.space2),
                         _buildFilterButton('missing', 'Non reçus (${report.missingCount})'),
+                        const SizedBox(width: VivSpacing.space2),
+                        _buildFilterButton('unverifiable', 'Non vérifiables (${report.unverifiableCount})'),
                       ],
                     ),
                     SizedBox(
@@ -704,33 +762,35 @@ class _BdcReconciliationScreenState extends ConsumerState<BdcReconciliationScree
                         DataColumn(label: Text('Client')),
                         DataColumn(label: Text('E-mail destinataire')),
                         DataColumn(label: Text('Montant HT')),
-                        DataColumn(label: Text('Date réception PST')),
+                        DataColumn(label: Text('Envoyé le (base)')),
+                        DataColumn(label: Text('Copie reçue le (PST)')),
                       ],
                       rows: filteredEntries.map((e) {
                         return DataRow(
                           cells: [
-                            DataCell(
-                              e.isConfirmedInPst
-                                  ? _buildStatusBadge(
-                                      'Reçu dans Outlook',
-                                      Colors.teal.shade700,
-                                      Colors.teal.shade50,
-                                      LucideIcons.check,
-                                    )
-                                  : _buildStatusBadge(
-                                      'Non reçu (À réinitialiser)',
-                                      Colors.red.shade700,
-                                      Colors.red.shade50,
-                                      LucideIcons.x,
-                                    ),
-                            ),
+                            DataCell(_buildEntryStatus(e)),
                             DataCell(Text(e.providerId, style: const TextStyle(fontWeight: FontWeight.bold))),
                             DataCell(Text(e.bdcNumber ?? '-')),
                             DataCell(Text(e.consultantName ?? '-')),
                             DataCell(Text(e.clientName ?? '-')),
-                            DataCell(Text(e.sentToEmail ?? '-')),
+                            DataCell(
+                              e.hasRecipientMismatch
+                                  ? Tooltip(
+                                      message: "La copie a été envoyée à : ${e.mismatchedRecipients.join(', ')}",
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(LucideIcons.triangleAlert, size: 14, color: Colors.amber.shade800),
+                                          const SizedBox(width: 4),
+                                          Text(e.sentToEmail ?? '-'),
+                                        ],
+                                      ),
+                                    )
+                                  : Text(e.sentToEmail ?? '-'),
+                            ),
                             DataCell(Text(e.totalHt != null ? "${e.totalHt!.toStringAsFixed(2)} €" : '-')),
-                            DataCell(Text(e.receivedTime ?? '-')),
+                            DataCell(Text(_formatDate(e.sentAt))),
+                            DataCell(Text(_formatDate(e.copyDate))),
                           ],
                         );
                       }).toList(),
@@ -740,7 +800,142 @@ class _BdcReconciliationScreenState extends ConsumerState<BdcReconciliationScree
             ),
           ),
         ),
+
+        if (report.orphans.isNotEmpty) ...[
+          const SizedBox(height: VivSpacing.space5),
+          _buildOrphansCard(report),
+        ],
       ],
+    );
+  }
+
+  Widget _buildEntryStatus(ReconciliationEntry e) {
+    if (e.isBounced) {
+      return Tooltip(
+        message: "Un avis de non-remise cite cette adresse : le fournisseur n'a pas reçu le BDC. "
+            "Corrigez l'adresse dans Boond, puis renvoyez-le.",
+        child: _buildStatusBadge('Adresse rejetée', Colors.deepOrange.shade700, Colors.deepOrange.shade50,
+            LucideIcons.mailX),
+      );
+    }
+    switch (e.status) {
+      case ReconciliationStatus.confirmed:
+        return _buildStatusBadge('Reçu dans Outlook', Colors.teal.shade700, Colors.teal.shade50, LucideIcons.check);
+      case ReconciliationStatus.missing:
+        return _buildStatusBadge('Non reçu (À réinitialiser)', Colors.red.shade700, Colors.red.shade50, LucideIcons.x);
+      case ReconciliationStatus.unverifiable:
+        return Tooltip(
+          message: e.note ?? "Impossible de conclure à partir de ce PST.",
+          child: _buildStatusBadge(
+              'Non vérifiable', Colors.amber.shade800, Colors.amber.shade50, LucideIcons.circleQuestionMark),
+        );
+    }
+  }
+
+  String _formatDate(DateTime? d) {
+    if (d == null) return '-';
+    String two(int v) => v.toString().padLeft(2, '0');
+    return '${two(d.day)}/${two(d.month)}/${d.year} ${two(d.hour)}:${two(d.minute)}';
+  }
+
+  /// Résumé de ce que contient le PST : couverture, copies trouvées et e-mails écartés.
+  Widget _buildScanSummary(BdcReconciliationReport report) {
+    final scan = report.scan;
+    final lines = <String>[
+      "${scan.scannedItems} e-mails parcourus dans ${scan.scannedFolders} dossiers, "
+          "du ${_formatDate(scan.oldest)} au ${_formatDate(scan.newest)}.",
+      "${report.validCopiesForPeriod} copie(s) de BDC de la période envoyées par ${report.expectedSender} "
+          "(pièces jointes en ${report.periodCode}).",
+      "Écartés : ${report.otherPeriodItems} BDC d'autres périodes, "
+          "${report.ignoredRepliesOrForwards} réponse(s) ou transfert(s), "
+          "${report.ignoredOtherSenders} e-mail(s) d'un autre expéditeur, "
+          "${report.ignoredOtherClasses} avis ou message(s) non standard.",
+      if (scan.deliveryReports > 0) "${scan.deliveryReports} avis de remise ou de non-remise présents dans le PST.",
+      if (report.recipientMismatchCount > 0)
+        "${report.recipientMismatchCount} BDC non vérifiable(s) : leur copie est adressée à une autre adresse "
+            "que celle enregistrée. À contrôler à la main.",
+      if (report.bouncedCount > 0)
+        "${report.bouncedCount} BDC rejeté(s) par le serveur du destinataire (adresse invalide) : "
+            "corrigez l'adresse dans Boond avant de les renvoyer.",
+      if (scan.itemErrors > 0) "${scan.itemErrors} e-mail(s) illisible(s) ignoré(s).",
+      for (final err in scan.folderErrors) "Dossier illisible : $err",
+    ];
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(VivSpacing.space4),
+      decoration: BoxDecoration(
+        color: VivColors.paper,
+        borderRadius: BorderRadius.circular(VivSpacing.radiusMd),
+        border: Border.all(color: VivColors.gray200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(LucideIcons.fileSearch, size: 16, color: Colors.black),
+              const SizedBox(width: VivSpacing.space2),
+              Text("Contenu du PST analysé", style: VivTypography.h4),
+            ],
+          ),
+          const SizedBox(height: VivSpacing.space2),
+          for (final line in lines)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text("• $line", style: VivTypography.small),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Copies de BDC trouvées dans le PST sans enregistrement en base locale (envoi depuis un autre poste ?).
+  Widget _buildOrphansCard(BdcReconciliationReport report) {
+    return ShadCard(
+      child: Padding(
+        padding: const EdgeInsets.all(VivSpacing.space4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(LucideIcons.info, size: 16, color: Colors.black),
+                const SizedBox(width: VivSpacing.space2),
+                Text("Copies présentes dans Outlook mais absentes de cette base (${report.orphans.length})",
+                    style: VivTypography.h4),
+              ],
+            ),
+            const SizedBox(height: VivSpacing.space1),
+            Text(
+              "Ces BDC ont bien été reçus en copie, mais ce poste n'en garde aucune trace : ils ont sans doute été "
+              "envoyés depuis un autre poste. Aucune action n'est faite sur eux.",
+              style: VivTypography.small.copyWith(color: VivColors.gray500),
+            ),
+            const SizedBox(height: VivSpacing.space3),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: DataTable(
+                headingRowColor: WidgetStateProperty.all(VivColors.gray100),
+                columns: const [
+                  DataColumn(label: Text('ID Fournisseur')),
+                  DataColumn(label: Text('N° BDC')),
+                  DataColumn(label: Text('Destinataire(s)')),
+                  DataColumn(label: Text('Copie reçue le')),
+                ],
+                rows: report.orphans
+                    .map((o) => DataRow(cells: [
+                          DataCell(Text(o.providerId, style: const TextStyle(fontWeight: FontWeight.bold))),
+                          DataCell(Text(o.bdcNumber)),
+                          DataCell(Text(o.recipients.isEmpty ? '-' : o.recipients.join(', '))),
+                          DataCell(Text(_formatDate(o.date))),
+                        ]))
+                    .toList(),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

@@ -5,6 +5,7 @@ import '../../design_system/viv_colors.dart';
 import '../../design_system/viv_spacing.dart';
 import '../../design_system/viv_typography.dart';
 import '../../providers/settings_provider.dart';
+import '../models/app_settings.dart';
 import '../../services/boond_service.dart';
 import '../providers/update_provider.dart';
 
@@ -24,6 +25,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   final _smtpPortController = TextEditingController();
   final _smtpUserController = TextEditingController();
   final _smtpPassController = TextEditingController();
+  final _bdcHourlyLimitController = TextEditingController();
   bool _isTestingConnection = false;
 
   Future<void> _testConnection() async {
@@ -67,6 +69,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _smtpPortController.text = settings.smtpPort.toString();
     _smtpUserController.text = settings.smtpUser;
     _smtpPassController.text = settings.smtpPassword;
+    _bdcHourlyLimitController.text = settings.bdcHourlyLimit.toString();
   }
 
   @override
@@ -78,6 +81,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _smtpPortController.dispose();
     _smtpUserController.dispose();
     _smtpPassController.dispose();
+    _bdcHourlyLimitController.dispose();
     super.dispose();
   }
 
@@ -95,8 +99,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       smtpPort: int.tryParse(_smtpPortController.text) ?? 587,
       smtpUser: _smtpUserController.text,
       smtpPassword: _smtpPassController.text,
+      bdcHourlyLimit: int.tryParse(_bdcHourlyLimitController.text.trim()) ?? settings.bdcHourlyLimit,
     );
-    
+    // Afficher la valeur réellement retenue (bornée entre le minimum et le maximum autorisés)
+    _bdcHourlyLimitController.text = newSettings.bdcHourlyLimit.toString();
+
     ref.read(settingsProvider.notifier).updateSettings(newSettings);
     
     ShadToaster.of(context).show(
@@ -219,6 +226,33 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     controller: _smtpPassController,
                     placeholder: '••••••••',
                     obscureText: true,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: VivSpacing.space4),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  width: 220,
+                  child: _buildField(
+                    label: 'Plafond de BDC par heure',
+                    controller: _bdcHourlyLimitController,
+                    placeholder: '${AppSettings.defaultBdcHourlyLimit}',
+                  ),
+                ),
+                const SizedBox(width: VivSpacing.space4),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 26),
+                    child: Text(
+                      "Au-delà d'environ 100 e-mails par heure, la boîte d'envoi perd les messages sans erreur, et les "
+                      "rapports de production envoyés par n8n consomment le même quota. L'envoi des BDC se met en pause "
+                      "à ce plafond puis reprend seul. Recommandé : ${AppSettings.defaultBdcHourlyLimit} "
+                      "(entre ${AppSettings.minBdcHourlyLimit} et ${AppSettings.maxBdcHourlyLimit}).",
+                      style: VivTypography.small.copyWith(color: VivColors.gray500),
+                    ),
                   ),
                 ),
               ],
